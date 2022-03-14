@@ -442,10 +442,10 @@ static id clientForHandle(void *data, NSURLHandle *hdl)
   if (data != 0)
     {
       [clientsLock lock];
-      client = (id)NSMapGet((NSMapTable*)data, hdl);
+      client = RETAIN((id)NSMapGet((NSMapTable*)data, hdl));
       [clientsLock unlock];
     }
-  return client;
+  return AUTORELEASE(client);
 }
 
 /**
@@ -1577,7 +1577,7 @@ static NSUInteger	urlAlign;
 - (void) loadResourceDataNotifyingClient: (id)client
 			      usingCache: (BOOL)shouldUseCache
 {
-  NSURLHandle	*handle = [self URLHandleUsingCache: YES];
+  NSURLHandle	*handle = [self URLHandleUsingCache: shouldUseCache];
   NSData	*d;
 
   if (shouldUseCache == YES && (d = [handle availableResourceData]) != nil)
@@ -1915,7 +1915,7 @@ static NSUInteger	urlAlign;
       if (c != 0)
 	{
 	  handle = [[c alloc] initWithURL: self cached: shouldUseCache];
-	  IF_NO_GC([handle autorelease];)
+	  IF_NO_ARC([handle autorelease];)
 	}
     }
   return handle;
@@ -2005,18 +2005,20 @@ static NSUInteger	urlAlign;
 {
   id	c = clientForHandle(_clients, sender);
 
+  RETAIN(self);
+  [sender removeClient: self];
   if (c != nil)
     {
+      [clientsLock lock];
+      NSMapRemove((NSMapTable*)_clients, (void*)sender);
+      [clientsLock unlock];
       if ([c respondsToSelector:
 	@selector(URL:resourceDidFailLoadingWithReason:)])
 	{
 	  [c URL: self resourceDidFailLoadingWithReason: reason];
 	}
-      [clientsLock lock];
-      NSMapRemove((NSMapTable*)_clients, (void*)sender);
-      [clientsLock unlock];
     }
-  [sender removeClient: self];
+  RELEASE(self);
 }
 
 - (void) URLHandleResourceDidBeginLoading: (NSURLHandle*)sender
@@ -2027,34 +2029,36 @@ static NSUInteger	urlAlign;
 {
   id	c = clientForHandle(_clients, sender);
 
+  RETAIN(self);
+  [sender removeClient: self];
   if (c != nil)
     {
+      [clientsLock lock];
+      NSMapRemove((NSMapTable*)_clients, (void*)sender);
+      [clientsLock unlock];
       if ([c respondsToSelector: @selector(URLResourceDidCancelLoading:)])
 	{
 	  [c URLResourceDidCancelLoading: self];
 	}
-      [clientsLock lock];
-      NSMapRemove((NSMapTable*)_clients, (void*)sender);
-      [clientsLock unlock];
     }
-  [sender removeClient: self];
+  RELEASE(self);
 }
 
 - (void) URLHandleResourceDidFinishLoading: (NSURLHandle*)sender
 {
   id	c = clientForHandle(_clients, sender);
 
-  IF_NO_GC([self retain];)
+  RETAIN(self);
   [sender removeClient: self];
   if (c != nil)
     {
+      [clientsLock lock];
+      NSMapRemove((NSMapTable*)_clients, (void*)sender);
+      [clientsLock unlock];
       if ([c respondsToSelector: @selector(URLResourceDidFinishLoading:)])
 	{
 	  [c URLResourceDidFinishLoading: self];
 	}
-      [clientsLock lock];
-      NSMapRemove((NSMapTable*)_clients, (void*)sender);
-      [clientsLock unlock];
     }
   RELEASE(self);
 }

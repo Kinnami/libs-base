@@ -233,11 +233,7 @@ readContentsOfFile(NSString *path, void **buf, off_t *len, NSZone *zone)
 {
   NSFileManager	*mgr = [NSFileManager defaultManager];
   NSDictionary	*att;
-#if defined(_WIN32)
-  const unichar	*thePath = 0;
-#else
-  const char	*thePath = 0;
-#endif
+  const GSNativeChar	*thePath = 0;
   FILE		*theFile = 0;
   void		*tmp = 0;
   int		c;
@@ -277,11 +273,7 @@ readContentsOfFile(NSString *path, void **buf, off_t *len, NSZone *zone)
     }
 #endif /* __ANDROID__ */
 
-#if defined(_WIN32)
-  thePath = (const unichar*)[path fileSystemRepresentation];
-#else
   thePath = [path fileSystemRepresentation];
-#endif
   if (thePath == 0)
     {
       NSWarnFLog(@"Open (%@) attempt failed - bad path", path);
@@ -1743,8 +1735,8 @@ failure:
 {
 #if defined(_WIN32)
   NSUInteger	length = [path length];
-  unichar	wthePath[length + 100];
-  unichar	wtheRealPath[length + 100];
+  GSNativeChar	wthePath[length + 100];
+  GSNativeChar	wtheRealPath[length + 100];
   int		c;
   FILE		*theFile;
   BOOL		useAuxiliaryFile = NO;
@@ -1834,7 +1826,7 @@ failure:
 	{
 	  att = [[mgr fileAttributesAtPath: path
 			      traverseLink: YES] mutableCopy];
-	  IF_NO_GC(AUTORELEASE(att));
+	  IF_NO_ARC(AUTORELEASE(att);)
 	}
 
       /* To replace the existing file on windows, it must be writable.
@@ -1858,7 +1850,7 @@ failure:
 	/* Windows 9x does not support MoveFileEx */
       else if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
 	{
-	  unichar	secondaryFile[length + 100];
+	  GSNativeChar	secondaryFile[length + 100];
 
 	  wcscpy(secondaryFile, wthePath);
 	  wcscat(secondaryFile, L"-delete");
@@ -2091,7 +2083,7 @@ failure:
 	{
           NSMutableDictionary *mAtt = [att mutableCopy];
 
-          IF_NO_GC(AUTORELEASE(mAtt));
+          IF_NO_ARC(AUTORELEASE(mAtt);)
 	  /*
 	   * We have created a new file - so we attempt to make it's
 	   * attributes match that of the original.
@@ -3623,11 +3615,7 @@ getBytes(void* dst, void* src, unsigned len, unsigned limit, unsigned *pos)
   off_t		off;
   int		fd;
 
-#if defined(_WIN32)
-  const unichar	*thePath = (const unichar*)[path fileSystemRepresentation];
-#else
-  const char	*thePath = [path fileSystemRepresentation];
-#endif
+  const GSNativeChar	*thePath = [path fileSystemRepresentation];
 
   if (thePath == 0)
     {
