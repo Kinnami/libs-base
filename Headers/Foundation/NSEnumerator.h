@@ -42,7 +42,7 @@ typedef struct
   unsigned long	state;
   __unsafe_unretained id		*itemsPtr;
   unsigned long	*mutationsPtr;
-  unsigned long	extra[5];
+  uintptr_t	extra[5];
 } NSFastEnumerationState;
 
 @protocol NSFastEnumeration
