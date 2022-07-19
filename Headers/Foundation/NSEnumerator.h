@@ -39,7 +39,7 @@ extern "C" {
 
 typedef struct
 {
-  unsigned long	state;
+  uintptr_t	state;
   __unsafe_unretained id		*itemsPtr;
   unsigned long	*mutationsPtr;
   uintptr_t	extra[5];
