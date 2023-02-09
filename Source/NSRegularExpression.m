@@ -52,7 +52,8 @@
 #import "Foundation/NSCoder.h"
 #import "Foundation/NSUserDefaults.h"
 #import "Foundation/NSNotification.h"
-
+#import "Foundation/NSDictionary.h"
+#import "Foundation/NSError.h"
 
 /**
  * To be helpful, Apple decided to define a set of flags that mean exactly the
@@ -132,6 +133,13 @@ NSRegularExpressionOptionsToURegexpFlags(NSRegularExpressionOptions opts)
   if (U_FAILURE(s))
     {
       // FIXME: Do something sensible with the error parameter.
+      if (e != NULL)						/* CJEC, 6-Feb-23: Very basic NSError */
+      	{
+		NSString *		poszError;
+		
+		poszError = [NSString stringWithFormat: @"Could not create regular expression '%@'. ICU error %s", aPattern, u_errorName (s)];
+      	*e = [NSError errorWithDomain: @"ICU" code: s userInfo: [NSDictionary dictionaryWithObjectsAndKeys: poszError, NSLocalizedDescriptionKey, nil]];
+      	}
       [self release];
       return nil;
     }
