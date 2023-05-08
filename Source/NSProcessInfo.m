@@ -233,7 +233,7 @@ static NSMutableSet	*mySet = nil;
 
 #ifdef __ANDROID__
 static jobject _androidContext = NULL;
-static NSString *_androidFilesDir = nil;
+static NSString *_androidFilesDir = @"/data/data/com.termux/files/home/";
 static NSString *_androidCacheDir = nil;
 #endif
 
