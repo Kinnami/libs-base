@@ -285,7 +285,7 @@ static GSTcpTune        *tune = nil;
 
   do
     {
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       if (asset)
 	{
 	  result = AAsset_read(asset, buf, len);
@@ -386,7 +386,7 @@ static GSTcpTune        *tune = nil;
   [self ignoreReadDescriptor];
   [self ignoreWriteDescriptor];
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (asset)
     {
       AAsset_close(asset);
@@ -1090,7 +1090,7 @@ NSString * const GSSOCKSRecvAddr = @"GSSOCKSRecvAddr";
 
   if (d < 0)
     {
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       asset = [NSBundle assetForPath:path withMode:AASSET_MODE_RANDOM];
       if (asset)
 	{
@@ -1669,7 +1669,7 @@ NSString * const GSSOCKSRecvAddr = @"GSSOCKSRecvAddr";
 {
   off_t	result = -1;
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (asset)
     {
       result = AAsset_seek(asset, 0, SEEK_CUR);
@@ -1700,7 +1700,7 @@ NSString * const GSSOCKSRecvAddr = @"GSSOCKSRecvAddr";
 {
   off_t	result = -1;
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (asset)
     {
       result = AAsset_seek(asset, 0, SEEK_END);
@@ -1731,7 +1731,7 @@ NSString * const GSSOCKSRecvAddr = @"GSSOCKSRecvAddr";
 {
   off_t	result = -1;
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (asset)
     {
       result = AAsset_seek(asset, (off_t)pos, SEEK_SET);
@@ -1772,7 +1772,7 @@ NSString * const GSSOCKSRecvAddr = @"GSSOCKSRecvAddr";
 
   [self setNonBlocking: NO];
   
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (asset)
     {
       AAsset_close(asset);

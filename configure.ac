@@ -1249,7 +1249,7 @@ case "$target_os" in
 		LDFLAGS="$LDFLAGS -Wl,-R/usr/pkg/lib -L/usr/pkg/lib";;
   linux-android* )
 		# link against libandroid for native application APIs
-		LIBS="$LIBS -landroid";;
+		LIBS="$LIBS";;
 esac
 
 #--------------------------------------------------------------------

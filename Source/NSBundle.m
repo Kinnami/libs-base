@@ -236,7 +236,7 @@ static NSString	*library_combo =
   nil;
 #endif
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
 static jobject _jassetManager = NULL;
 static AAssetManager *_assetManager = NULL;
 #endif
@@ -3301,7 +3301,7 @@ IF_NO_ARC(
   DESTROY(_localizations);
 }
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
 
 + (AAssetManager *)assetManager
 {
@@ -3392,7 +3392,7 @@ IF_NO_ARC(
   return assetDir;
 }
 
-#endif /* __ANDROID__ */
+#endif /* __ANDROID_WITH_NDK__ */
 
 @end
 

@@ -1796,7 +1796,7 @@ static NSStringEncoding	defaultEncoding;
 
       if (_STAT(lpath, &statbuf) != 0)
 	{
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
           /* Android: try using asset manager if path is in
            * main bundle resources
            */
@@ -1868,7 +1868,7 @@ static NSStringEncoding	defaultEncoding;
 	  return YES;
 	}
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
         /* Android: try using asset manager if path is in
          * main bundle resources
          */
@@ -2567,7 +2567,7 @@ static NSStringEncoding	defaultEncoding;
 typedef	struct	_GSEnumeratedDirectory {
   NSString *path;
   _DIR *pointer;
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   AAssetDir *assetDir;
 #endif
 } GSEnumeratedDirectory;
@@ -2577,7 +2577,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
 {
   DESTROY(X.path);
   _CLOSEDIR(X.pointer);
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (X.assetDir)
     {
       AAssetDir_close(X.assetDir);
@@ -2647,7 +2647,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
       localPath = [_mgr fileSystemRepresentationWithPath: path];
       dir_pointer = _OPENDIR(localPath);
       
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       AAssetDir *assetDir = NULL;
       if (!dir_pointer)
 	{
@@ -2666,7 +2666,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
 
           item.ext.path = @"";
           item.ext.pointer = dir_pointer;
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
           item.ext.assetDir = assetDir;
 #endif
 
@@ -2781,7 +2781,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
       struct _STATB	statbuf;
       const GSNativeChar *dirname = NULL;
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       if (dir.assetDir)
 	{
 	  /* This will only return files and not directories, which means that
@@ -3122,7 +3122,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
   int		rbytes;
   int		wbytes;
   char		buffer[bufsize];
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   AAsset	*asset = NULL;
 #endif
 
@@ -3143,7 +3143,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
   /* Open the source file. In case of error call the handler. */
   sourceFd = open([self fileSystemRepresentationWithPath: source],
     GSBINIO|O_RDONLY);
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (sourceFd < 0)
     {
       // Android: try using asset manager if path is in main bundle resources
@@ -3166,7 +3166,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
     GSBINIO|O_WRONLY|O_CREAT|O_TRUNC, fileMode);
   if (destFd < 0)
     {
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       if (asset)
 	{
 	  AAsset_close(asset);
@@ -3186,7 +3186,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
      file. In case of errors call the handler and abort the operation. */
   for (i = 0; i < fileSize; i += rbytes)
     {
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       if (asset)
 	{
 	  rbytes = AAsset_read(asset, buffer, bufsize);
@@ -3200,7 +3200,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
             {
               break;    // End of input file
             }
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
           if (asset)
 	    {
 	      AAsset_close(asset);
@@ -3220,7 +3220,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
       wbytes = write (destFd, buffer, rbytes);
       if (wbytes != rbytes)
 	{
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
           if (asset)
 	    {
 	      AAsset_close(asset);
@@ -3237,7 +3237,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
 					   toPath: destination];
         }
     }
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (asset)
     {
       AAsset_close(asset);
@@ -3589,7 +3589,7 @@ static NSSet	*fileKeys = nil;
   unsigned		l = 0;
   unsigned		i;
   const GSNativeChar *lpath;
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   AAsset *asset = NULL;
 #endif
 
@@ -3611,7 +3611,7 @@ static NSSet	*fileKeys = nil;
     {
       if (lstat(lpath, &d->statbuf) != 0)
 	{
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
 	  /* Android: try using asset manager if path is in
 	   * main bundle resources
 	   */
@@ -3625,7 +3625,7 @@ static NSSet	*fileKeys = nil;
 #endif
   if (_STAT(lpath, &d->statbuf) != 0)
     {
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       // Android: try using asset manager if path is in main bundle resources
       asset = [NSBundle assetForPath: path];
       if (asset == NULL)
@@ -3638,7 +3638,7 @@ static NSSet	*fileKeys = nil;
 	{
 	  d->_path[i] = lpath[i];
 	}
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       if (asset)
 	{
 	  // set some basic stat values for Android assets

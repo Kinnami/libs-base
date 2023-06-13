@@ -36,7 +36,7 @@ extern "C" {
 #import	<Foundation/NSObject.h>
 #import	<Foundation/NSString.h>
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
 #include <android/asset_manager_jni.h>
 #endif
 
@@ -548,7 +548,7 @@ GS_EXPORT_CLASS
 /** Cleans up the path cache for the bundle. */
 - (void) cleanPathCache;
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
 
 /**
  * Sets the Java Android asset manager.
@@ -584,7 +584,7 @@ GS_EXPORT_CLASS
  */
 + (AAssetDir *) assetDirForPath: (NSString *)path;
 
-#endif /* __ANDROID__ */
+#endif /* __ANDROID_WITH_NDK__ */
 
 @end
 

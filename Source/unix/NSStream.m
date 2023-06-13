@@ -33,7 +33,7 @@
 #  include	<sys/fcntl.h>
 #endif
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
 #  include <android/asset_manager_jni.h>
 #endif
 
@@ -61,7 +61,7 @@
 {
 @private
   NSString *_path;
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   AAsset *_asset;
 #endif
 }
@@ -140,7 +140,7 @@
       return 0;
     }
 
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (_asset)
   {
     readLen = AAsset_read(_asset, buffer, len);
@@ -182,7 +182,7 @@
 
       if ([self _isOpened])
         {
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
           if (_asset)
             {
               offset = AAsset_seek(_asset, 0, SEEK_CUR);
@@ -205,7 +205,7 @@
   fd = open([_path fileSystemRepresentation], O_RDONLY|O_NONBLOCK);
   if (fd < 0)
     {
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
       _asset = [NSBundle assetForPath:_path withMode:AASSET_MODE_STREAMING];
       if (!_asset)
 #endif
@@ -220,7 +220,7 @@
 
 - (void) close
 {
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   if (_asset)
     {
       AAsset_close(_asset);

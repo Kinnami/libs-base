@@ -239,7 +239,7 @@ readContentsOfFile(NSString *path, void **buf, off_t *len, NSZone *zone)
   int		c;
   off_t         fileLength;
   
-#ifdef __ANDROID__
+#ifdef __ANDROID_WITH_NDK__
   // Android: try using asset manager if path is in main bundle resources
   AAsset *asset = [NSBundle assetForPath: path withMode: AASSET_MODE_BUFFER];
   if (asset)
@@ -271,7 +271,7 @@ readContentsOfFile(NSString *path, void **buf, off_t *len, NSZone *zone)
       *len = fileLength;
       return YES;
     }
-#endif /* __ANDROID__ */
+#endif /* __ANDROID_WITH_NDK__ */
 
   thePath = [path fileSystemRepresentation];
   if (thePath == 0)
