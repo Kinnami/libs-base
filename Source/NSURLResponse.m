@@ -50,6 +50,16 @@ typedef struct {
 #define	inst	((Internal*)(o->_NSURLResponseInternal))
 
 
+/* CJEC, 9-Nov-23: TODO: File GNUSTEP BUG: The GNUstep developers correctly identified that HTTP header field names are case-insensitive
+										but implemented the _GSMutableInsensitiveDictionary with NSMutableDictionary, which is
+										case-sensitive! To work around this, application code should use the strings explicitly
+										defined in the RFC, and this code has been corrected to use them so that case-sensitive
+										comparisons work. I have quickly gone through the URL-related classes and converted the
+										case in various files that were missed by previous developers. (Some had already been
+										converted to follow this exact approach.)
+										See https://www.ietf.org/rfc/rfc2616.txt
+										and https://en.wikipedia.org/wiki/List_of_HTTP_header_fields
+*/
 @interface	_GSMutableInsensitiveDictionary : NSMutableDictionary
 @end
 
@@ -59,7 +69,7 @@ typedef struct {
 {
   if (NSURLResponseUnknownLength == this->expectedContentLength)
     {
-      NSString	*s= [self _valueForHTTPHeaderField: @"content-length"];
+      NSString	*s= [self _valueForHTTPHeaderField: @"Content-Length"];
 
       if ([s length] > 0)
 	{
@@ -74,14 +84,14 @@ typedef struct {
       NSScanner		*s;
       NSString		*v;
 
-      v = [self _valueForHTTPHeaderField: @"content-type"];
+      v = [self _valueForHTTPHeaderField: @"Content-Type"];
       if (v == nil)
         {
 	  v = @"text/plain";	// No content type given.
 	}
       s = [NSScanner scannerWithString: v];
       p = [GSMimeParser new];
-      c = AUTORELEASE([[GSMimeHeader alloc] initWithName: @"content-type"
+      c = AUTORELEASE([[GSMimeHeader alloc] initWithName: @"Content-Type"
                                                    value: nil]);
       /* We just set the header body, so we know it will scan and don't need
        * to check the retrurn type.
@@ -311,7 +321,7 @@ typedef struct {
  */
 - (NSString *) suggestedFilename
 {
-  NSString	*disp = [self _valueForHTTPHeaderField: @"content-disposition"];
+  NSString	*disp = [self _valueForHTTPHeaderField: @"Content-Disposition"];
   NSString	*name = nil;
 
   if (disp != nil)
@@ -322,7 +332,7 @@ typedef struct {
 
       // Try to get name from content disposition header.
       p = AUTORELEASE([GSMimeParser new]);
-      h = [[GSMimeHeader alloc] initWithName: @"content-displosition"
+      h = [[GSMimeHeader alloc] initWithName: @"Content-Displosition"
 				       value: disp];
       IF_NO_ARC([h autorelease];)
       sc = [NSScanner scannerWithString: [h value]];

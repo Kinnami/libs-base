@@ -1107,7 +1107,7 @@ typedef struct {
 	    {
 	      _shouldClose = YES;
 	    }
-	  else if ((s = [[document headerNamed: @"connection"] value]) != nil
+	  else if ((s = [[document headerNamed: @"Connection"] value]) != nil
 	    && [s caseInsensitiveCompare: @"close"] == NSOrderedSame)
 	    {
 	      _shouldClose = YES;
@@ -1120,7 +1120,7 @@ typedef struct {
 	  s = [info objectForKey: NSHTTPPropertyStatusCodeKey];
 	  _statusCode = [s intValue];
 
-	  s = [[document headerNamed: @"content-length"] value];
+	  s = [[document headerNamed: @"Content-Length"] value];
 	  if ([s length] > 0)
 	    {
 	      len = [s intValue];
@@ -1130,14 +1130,14 @@ typedef struct {
 
 /* Should use this?
 	  NSString		*enc;
-	  enc = [[document headerNamed: @"content-transfer-encoding"] value];
+	  enc = [[document headerNamed: @"Content-Transfer-Encoding"] value];
 	  if (enc == nil)
 	    {
-	      enc = [[document headerNamed: @"transfer-encoding"] value];
+	      enc = [[document headerNamed: @"Transfer-Encoding"] value];
 	    }
 */
 
-	  info = [document headerNamed: @"content-type"];
+	  info = [document headerNamed: @"Content-Type"];
 	  ct = [document contentType];
 	  st = [document contentSubtype];
 	  if (ct && st)
@@ -1177,7 +1177,7 @@ typedef struct {
 	      NSURL	*url;
 
               NS_DURING
-                s = [[document headerNamed: @"location"] value];
+                s = [[document headerNamed: @"Location"] value];
                 url = [NSURL URLWithString: s];
               NS_HANDLER
                 url = nil;
@@ -1257,7 +1257,7 @@ typedef struct {
 	    }
 	  
 #if	USE_ZLIB
-	  s = [[document headerNamed: @"content-encoding"] value];
+	  s = [[document headerNamed: @"Content-Encoding"] value];
 	  if ([s isEqualToString: @"gzip"] || [s isEqualToString: @"x-gzip"])
 	    {
 	      this->decompressing = YES;

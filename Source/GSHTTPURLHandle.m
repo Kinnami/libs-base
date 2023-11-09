@@ -725,11 +725,11 @@ debugWrite(GSHTTPURLHandle *handle, NSData *data)
 
 	  info = [document headerNamed: @"http"];
 	  status = [[info objectForKey: NSHTTPPropertyStatusCodeKey] intValue];
-	  len = [[document headerNamed: @"content-length"] value];
-	  enc = [[document headerNamed: @"content-transfer-encoding"] value];
+	  len = [[document headerNamed: @"Content-Length"] value];
+	  enc = [[document headerNamed: @"Content-Transfer-Encoding"] value];
 	  if (enc == nil)
 	    {
-	      enc = [[document headerNamed: @"transfer-encoding"] value];
+	      enc = [[document headerNamed: @"Transfer-Encoding"] value];
 	    }
 
 	  if (status == 204 || status == 304)
@@ -767,7 +767,7 @@ debugWrite(GSHTTPURLHandle *handle, NSData *data)
 	      [sock closeFile];
 	      DESTROY(sock);
 	    }
-	  else if (nil != (val = [[document headerNamed: @"connection"] value]))
+	  else if (nil != (val = [[document headerNamed: @"Connection"] value]))
 	    {
 	      val = [val lowercaseString];
 	      if (YES == [val isEqualToString: @"close"])
