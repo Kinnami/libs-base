@@ -3345,7 +3345,6 @@ unfold(const unsigned char *src, const unsigned char *end, BOOL *folded)
 
 @end
 
-
 
 @interface	_GSMutableInsensitiveDictionary : NSMutableDictionary
 @end
@@ -3545,7 +3544,7 @@ static NSCharacterSet	*tokenSet = nil;
 	    }
 	}
     }
-  [buf appendData: [self rawMimeDataPreservingCase: YES foldedAt: 0]];
+  [self rawMimeDataPreservingCase: YES foldedAt: 0 to: buf];
   if (masked && *masked)
     {
       NSUInteger	len = [buf length];
@@ -4688,8 +4687,11 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
       NSArray   *a;
 
       a = [[value lowercaseString] componentsSeparatedByString: @"/"];
-      [self setObject: [a objectAtIndex: 0] forKey: @"Type"];
-      [self setObject: [a objectAtIndex: 1] forKey: @"Subtype"];
+      if ([a count] == 2)
+        {
+          [self setObject: [a objectAtIndex: 0] forKey: @"Type"];
+          [self setObject: [a objectAtIndex: 1] forKey: @"Subtype"];
+        }
     }
 }
 
@@ -7288,7 +7290,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
   enumerator = [headers objectEnumerator];
   while ((hdr = [enumerator nextObject]) != nil)
     {
-      [md appendData: [hdr rawMimeDataPreservingCase: NO foldedAt: fold]];
+      [hdr rawMimeDataPreservingCase: NO foldedAt: fold to: md];
     }
 
   if (partData != nil)
@@ -8083,7 +8085,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
               [document setHeader: @"Content-Transfer-Encoding"
 			    value: enc
 		       parameters: nil];
-    }
+	    }
         }
     }
 

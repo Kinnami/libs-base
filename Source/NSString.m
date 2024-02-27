@@ -28,7 +28,6 @@
    Boston, MA 02110 USA.
 
    <title>NSString class reference</title>
-   $Date$ $Revision$
 */
 
 /* Caveats:
@@ -1543,8 +1542,10 @@ GSICUCollatorOpen(NSStringCompareOptions mask, NSLocale *locale)
   if (len == 0)
     {
       RELEASE(d);
-      DESTROY(self);
-      return @"";
+      return [self initWithBytesNoCopy: (char *)""
+				length: 0
+			      encoding: NSASCIIStringEncoding
+			  freeWhenDone: NO];
     }
   data_bytes = [d bytes];
   if ((data_bytes != NULL) && (len >= 2))
@@ -1617,8 +1618,10 @@ GSICUCollatorOpen(NSStringCompareOptions mask, NSLocale *locale)
   if (len == 0)
     {
       RELEASE(d);
-      DESTROY(self);
-      return @"";
+      return [self initWithBytesNoCopy: (char *)""
+				length: 0
+			      encoding: NSASCIIStringEncoding
+			  freeWhenDone: NO];
     }
   data_bytes = [d bytes];
   if ((data_bytes != NULL) && (len >= 2))
@@ -1669,8 +1672,10 @@ GSICUCollatorOpen(NSStringCompareOptions mask, NSLocale *locale)
   if (len == 0)
     {
       RELEASE(d);
-      DESTROY(self);
-      return @"";
+      return [self initWithBytesNoCopy: (char *)""
+				length: 0
+			      encoding: NSASCIIStringEncoding
+			  freeWhenDone: NO];
     }
   self = [self initWithData: d encoding: enc];
   RELEASE(d);
@@ -1720,7 +1725,10 @@ GSICUCollatorOpen(NSStringCompareOptions mask, NSLocale *locale)
   if (len == 0)
     {
       DESTROY(self);
-      return @"";
+      return [self initWithBytesNoCopy: (char *)""
+				length: 0
+			      encoding: NSASCIIStringEncoding
+			  freeWhenDone: NO];
     }
   data_bytes = [d bytes];
   if ((data_bytes != NULL) && (len >= 2))
@@ -1767,7 +1775,10 @@ GSICUCollatorOpen(NSStringCompareOptions mask, NSLocale *locale)
   if (len == 0)
     {
       DESTROY(self);
-      return @"";
+      return [self initWithBytesNoCopy: (char *)""
+				length: 0
+			      encoding: NSASCIIStringEncoding
+			  freeWhenDone: NO];
     }
   data_bytes = [d bytes];
   if ((data_bytes != NULL) && (len >= 2))
@@ -1817,7 +1828,10 @@ GSICUCollatorOpen(NSStringCompareOptions mask, NSLocale *locale)
   if (len == 0)
     {
       DESTROY(self);
-      return @"";
+      return [self initWithBytesNoCopy: (char *)""
+				length: 0
+			      encoding: NSASCIIStringEncoding
+			  freeWhenDone: NO];
     }
   self = [self initWithData: d encoding: enc];
   if (self == nil)
@@ -6340,11 +6354,13 @@ static NSFileManager *fm = nil;
  */
 + (id) stringWithFormat: (NSString*)format, ...
 {
+  id    s;
+
   va_list ap;
   va_start(ap, format);
-  self = [super stringWithFormat: format arguments: ap];
+  s = [super stringWithFormat: format arguments: ap];
   va_end(ap);
-  return self;
+  return s;
 }
 
 /** <init/> <override-subclass />

@@ -22,7 +22,6 @@
    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
    Boston, MA 02110 USA.
 
-   $Date$ $Revision$
    */
 
 #import "common.h"
@@ -989,8 +988,10 @@ static Class	GSInlineArrayClass;
 
 - (id) initWithArray: (GSArray*)anArray
 {
-  [super initWithArray: anArray];
-  pos = array->_count;
+  if (nil != (self = [super initWithArray: anArray]))
+    {
+      pos = array->_count;
+    }
   return self;
 }
 

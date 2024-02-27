@@ -153,6 +153,11 @@
 /* Many systems have this file */
 #define SYSTEM_TIME_FILE @"/etc/localtime"
 
+/* Include public domain code (modified for use here) to parse standard
+ * posix time zone files.
+ */
+#include "tzdb.h"
+
 /* If TZDIR told us where the zoneinfo files are, don't append anything else */
 #ifdef TZDIR
 #define POSIX_TZONES     @""
@@ -162,11 +167,6 @@
 
 #define BUFFER_SIZE 512
 #define WEEK_MILLISECONDS (7.0*24.0*60.0*60.0*1000.0)
-
-/* Include public domain code (modified for use here) to parse standard
- * posix time zone files.
- */
-#include "tzdb.h"
 
 #if GS_USE_ICU == 1
 static inline int
@@ -806,6 +806,7 @@ static NSMapTable	*absolutes = 0;
 
 - (void) dealloc
 {
+  RELEASE(abbrev);
   RELEASE(timeZone);
   DEALLOC
 }
@@ -824,7 +825,7 @@ static NSMapTable	*absolutes = 0;
 		withDST: (BOOL)isDST
 {
   timeZone = RETAIN(aZone);
-  abbrev = anAbbrev;		// NB. Depend on this being retained in aZone
+  abbrev = RETAIN(anAbbrev);
   offset = anOffset;
   is_dst = isDST;
   return self;
@@ -1438,14 +1439,32 @@ static NSMapTable	*absolutes = 0;
        */
       {
         TIME_ZONE_INFORMATION tz;
-        DWORD dst = GetTimeZoneInformation(&tz);
+        DWORD dst;
         wchar_t *tzName;
-  
-        localZoneSource = @"function: 'GetTimeZoneInformation()'";
+
+#if defined(_MSC_VER) && defined(UCAL_H)
+        // Get time zone name for US locale as expected by ICU method below
+        LANGID origLangID = GetThreadUILanguage();
+        SetThreadUILanguage(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
+        dst = GetTimeZoneInformation(&tz);
+        SetThreadUILanguage(origLangID);
+
+        // Only tz.StandardName time zone conversions are supported, as
+        // the Zone-Tzid table lacks all daylight time conversions:
+        // e.g. 'W. Europe Daylight Time' <-> 'Europe/Berlin' is not listed.
+        //
+        // See: https://unicode-org.github.io/cldr-staging/charts/latest/supplemental/zone_tzid.html
+        tzName = tz.StandardName;
+#else
+        dst = GetTimeZoneInformation(&tz);
+
         if (dst == TIME_ZONE_ID_DAYLIGHT)
           tzName = tz.DaylightName;
         else
           tzName = tz.StandardName;
+#endif
+
+        localZoneSource = @"function: 'GetTimeZoneInformation()'";
 
 #if defined(_MSC_VER) && defined(UCAL_H)
         // Convert Windows timezone name to IANA identifier
@@ -1453,11 +1472,14 @@ static NSMapTable	*absolutes = 0;
           {
             UErrorCode status = U_ZERO_ERROR;
             UChar ianaTzName[128];
-            ucal_getTimeZoneIDForWindowsID(tzName, -1, NULL, ianaTzName, 128,
-              &status);
-            if (U_SUCCESS(status)) {
+            int32_t ianaTzNameLen = ucal_getTimeZoneIDForWindowsID(tzName,
+              -1, NULL, ianaTzName, 128, &status);
+            if (U_SUCCESS(status) && ianaTzNameLen > 0) {
               localZoneString = [NSString stringWithCharacters: ianaTzName
-                length: u_strlen(ianaTzName)];
+                length: ianaTzNameLen];
+            } else if (U_SUCCESS(status)) {
+              // this happens when ICU has no mapping for the time zone
+              NSLog(@"Unable to map timezone '%ls' to IANA format", tzName);
             } else {
               NSLog(@"Error converting timezone '%ls' to IANA format: %s",
                 tzName, u_errorName(status));
@@ -1828,12 +1850,17 @@ localZoneString, [zone name], sign, s/3600, (s/60)%60);
 	      while ((name = [enumerator nextObject]) != nil)
 		{
 		  NSTimeZone	*zone = nil;
+		  NSString	*ext;
 		  BOOL		isDir;
 		
 		  path = [zonedir stringByAppendingPathComponent: name];
+		  ext = [path pathExtension];
 		  if ([mgr fileExistsAtPath: path isDirectory: &isDir]
                     && isDir == NO
-                    && [[path pathExtension] isEqual: @"tab"] == NO)
+                    && [ext isEqual: @"tab"] == NO
+                    && [ext isEqual: @"zi"] == NO
+                    && [ext isEqual: @"list"] == NO
+                    && [ext isEqual: @"leapseconds"] == NO)
 		    {
 		      zone = [zoneDictionary objectForKey: name];
 		      if (zone == nil)
@@ -2944,7 +2971,7 @@ newDetailInZoneForType(GSTimeZone *zone, TypeInfo *type)
 static TypeInfo
 getTypeInfo(NSTimeInterval since, GSTimeZone *zone)
 {
-  int64_t       when = (int64_t)since;
+  time_t        when = (time_t)since;
   gstm		tm;
   TypeInfo      type;
 

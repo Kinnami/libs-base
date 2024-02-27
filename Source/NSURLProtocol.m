@@ -721,6 +721,11 @@ typedef struct {
   return NO;
 }
 
++ (BOOL) canInitWithTask: (NSURLSessionTask*)task
+{
+  return NO;
+}
+
 + (NSURLRequest *) canonicalRequestForRequest: (NSURLRequest *)request
 {
   return request;
@@ -957,6 +962,8 @@ typedef struct {
                 GSTLSCertificateKeyFile,
                 GSTLSCertificateKeyPassword,
                 GSTLSDebug,
+                GSTLSIssuers,
+                GSTLSOwners,
                 GSTLSPriority,
                 GSTLSRemoteHosts,
                 GSTLSRevokeFile,

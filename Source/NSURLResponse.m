@@ -1,4 +1,4 @@
-/* Implementation for NSURLResponse for GNUstep
+/** Implementation for NSURLResponse for GNUstep
    Copyright (C) 2006 Software Foundation, Inc.
 
    Written by:  Richard Frith-Macdonald <rfm@gnu.org>
@@ -140,14 +140,22 @@ typedef struct {
       while ((h = [e nextObject]) != nil)
         {
 	  NSString	*n = [h namePreservingCase: YES];
-	  NSString	*o = [this->headers objectForKey: n];
 	  NSString	*v = [h fullValue];
 
-	  if (nil != o)
+	  if ([v isKindOfClass: [NSString class]] && [v length] > 0)
 	    {
-	      n = [NSString stringWithFormat: @"%@, %@", o, n];
+	      NSString	*o = [this->headers objectForKey: n];
+
+	      if (nil != o)
+		{
+		  n = [NSString stringWithFormat: @"%@, %@", o, v];
+		}
+	      [self _setValue: v forHTTPHeaderField: n];
 	    }
-	  [self _setValue: v forHTTPHeaderField: n];
+	  else
+	    {
+	      NSLog(@"Ignored bad/empty header value for %@", h);
+	    }
 	}
     }
   [self _checkHeaders];
@@ -294,8 +302,15 @@ typedef struct {
 	  textEncodingName: nil];
   if (nil != self)
     {
+      NSString *k;
+      NSEnumerator *e = [headerFields keyEnumerator];
+      while (nil != (k = [e nextObject]))
+        {
+          NSString *v = [headerFields objectForKey: k];
+          [self _setValue: v forHTTPHeaderField: k];
+        }
+
       this->statusCode = statusCode;
-      this->headers = [headerFields copy];
       [self _checkHeaders];
     }
   return self;

@@ -151,6 +151,28 @@ testBlock(NSDictionary* dict)
 #  endif
   END_SET("Block predicates");
 }
+
+void testArray(void)
+{
+  NSArray	*array;
+  NSPredicate 	*predicate;
+
+  array = [NSArray arrayWithObjects:
+    [NSNumber numberWithInteger: 1],
+    [NSNumber numberWithInteger: 2],
+    [NSNumber numberWithInteger: 0],
+    nil];
+
+  predicate = [NSPredicate predicateWithFormat: @"SELF[FIRST] = 1"];
+  PASS([predicate evaluateWithObject: array], "first is one")
+
+  predicate = [NSPredicate predicateWithFormat: @"SELF[LAST] = 0"];
+  PASS([predicate evaluateWithObject: array], "last is zero")
+
+  predicate = [NSPredicate predicateWithFormat: @"SELF[SIZE] = 3"];
+  PASS([predicate evaluateWithObject: array], "size is three")
+}
+
 int main()
 {
   NSArray *filtered;
@@ -249,6 +271,15 @@ int main()
     nil];
   p = [NSPredicate predicateWithFormat: @"sum(a) == 3"]; 
   PASS([p evaluateWithObject: a], "aggregate sum works");
+
+  p = [NSPredicate predicateWithFormat: @"self IN %@",
+    [NSArray arrayWithObject:@"yes"]];
+  a = [[NSArray arrayWithObjects:@"yes", @"no", nil]
+    filteredArrayUsingPredicate: p];
+  PASS_EQUAL([a description], @"(yes)",
+    "predicate created with format can filter an array")
+
+  testArray();
 
   END_SET("basic")
 

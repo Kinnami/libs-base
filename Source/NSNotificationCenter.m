@@ -1,7 +1,7 @@
 /** Implementation of NSNotificationCenter for GNUstep
    Copyright (C) 1999 Free Software Foundation, Inc.
 
-   Written by:  Richard Frith-Macdonald <richard@brainstorm.co.uk>
+   Written by:  Richard Frith-Macdonald <rfm@gnu.org>
    Created: June 1999
 
    Many thanks for the earlier version, (from which this is loosely
@@ -26,7 +26,6 @@
    Boston, MA 02110 USA.
 
    <title>NSNotificationCenter class reference</title>
-   $Date$ $Revision$
 */
 
 #import "common.h"
@@ -543,8 +542,8 @@ purgeMapNode(GSIMapTable map, GSIMapNode node, id observer)
 
 @interface GSNotificationBlockOperation : NSOperation
 {
-	NSNotification *_notification;
-	GSNotificationBlock _block;
+  NSNotification	*_notification;
+  GSNotificationBlock	_block;
 }
 
 - (id) initWithNotification: (NSNotification *)notif 
@@ -557,72 +556,81 @@ purgeMapNode(GSIMapTable map, GSIMapNode node, id observer)
 - (id) initWithNotification: (NSNotification *)notif 
                       block: (GSNotificationBlock)block
 {
-	self = [super init];
-	if (self == nil)
-		return nil;
-
-	ASSIGN(_notification, notif);
-	_block = Block_copy(block);
-	return self;
-
+  if ((self = [super init]) != nil)
+    {
+      ASSIGN(_notification, notif);
+      _block = Block_copy(block);
+    }
+  return self;
 }
 
 - (void) dealloc
 {
-	DESTROY(_notification);
-	Block_release(_block);
-	[super dealloc];
+  DESTROY(_notification);
+  Block_release(_block);
+  DEALLOC
 }
 
 - (void) main
 {
-	CALL_BLOCK(_block, _notification);
+  CALL_BLOCK(_block, _notification);
 }
 
 @end
 
+/* Cached class for fast test when removing observer.
+ */
+static Class	GSNotificationObserverClass = Nil;
+
 @interface GSNotificationObserver : NSObject
 {
-	NSOperationQueue *_queue;
-	GSNotificationBlock _block;
+  NSOperationQueue	*_queue;
+  GSNotificationBlock	_block;
 }
 
 @end
 
 @implementation GSNotificationObserver
 
++ (void) initialize
+{
+  if ([GSNotificationObserver class] == self)
+    {
+      GSNotificationObserverClass = self;
+    }
+}
+
 - (id) initWithQueue: (NSOperationQueue *)queue 
                block: (GSNotificationBlock)block
 {
-	self = [super init];
-	if (self == nil)
-		return nil;
-
-	ASSIGN(_queue, queue);
-	_block = Block_copy(block);
-	return self;
+  if ((self = [super init]) != nil)
+    {
+      ASSIGN(_queue, queue);
+      _block = Block_copy(block);
+    }
+  return self;
 }
 
 - (void) dealloc
 {
-	DESTROY(_queue);
-	Block_release(_block);
-	[super dealloc];
+  DESTROY(_queue);
+  Block_release(_block);
+  DEALLOC
 }
 
 - (void) didReceiveNotification: (NSNotification *)notif
 {
-	if (_queue != nil)
-	{
-		GSNotificationBlockOperation *op = [[GSNotificationBlockOperation alloc] 
-			initWithNotification: notif block: _block];
+  if (_queue != nil)
+    {
+      GSNotificationBlockOperation *op = [[GSNotificationBlockOperation alloc] 
+	initWithNotification: notif block: _block];
 
-		[_queue addOperation: op];
-	}
-	else
-	{
-		CALL_BLOCK(_block, notif);
-	}
+      [_queue addOperation: op];
+    }
+  else
+    {
+      CALL_BLOCK(_block, notif);
+    }
 }
 
 @end
@@ -853,7 +861,7 @@ static NSNotificationCenter *default_center = nil;
  * the object argument is nil).</p>
  *
  * <p>For the name and object arguments, the constraints and behavior described 
- * in -addObserver:name:selector:object: remain valid.</p>
+ * in -addObserver:selector:name:object: remain valid.</p>
  *
  * <p>For each notification received by the center, the observer will execute 
  * the notification block. If the queue is not nil, the notification block is 
@@ -865,15 +873,15 @@ static NSNotificationCenter *default_center = nil;
                     queue: (NSOperationQueue *)queue 
                usingBlock: (GSNotificationBlock)block
 {
-	GSNotificationObserver *observer = 
-		[[GSNotificationObserver alloc] initWithQueue: queue block: block];
+  GSNotificationObserver *observer = 
+    [[GSNotificationObserver alloc] initWithQueue: queue block: block];
 
-	[self addObserver: observer 
-	         selector: @selector(didReceiveNotification:) 
-	             name: name 
-	           object: object];
+  [self addObserver: observer 
+	   selector: @selector(didReceiveNotification:) 
+	       name: name 
+	     object: object];
 
-	return observer;
+  return observer;	// Released when observer is removed.
 }
 
 /**
@@ -889,7 +897,9 @@ static NSNotificationCenter *default_center = nil;
                  object: (id)object
 {
   if (name == nil && object == nil && observer == nil)
+    {
       return;
+    }
 
   /*
    *	NB. The removal algorithm depends on an implementation characteristic
@@ -1033,6 +1043,14 @@ static NSNotificationCenter *default_center = nil;
 	}
     }
   unlockNCTable(TABLE);
+
+  /* As a special case GSNotificationObserver instances are owned by the
+   * notification center and are released when they are removed.
+   */
+  if (object_getClass(observer) == GSNotificationObserverClass)
+    {
+      RELEASE(observer);
+    }
 }
 
 /**

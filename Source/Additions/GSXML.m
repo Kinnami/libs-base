@@ -164,7 +164,9 @@ static char * xml_strdup(const char *from)
       xmlInitParser();
       xmlMemSetup(free, malloc, realloc, xml_strdup);
       xmlInitializeCatalog();
+#if LIBXML_VERSION < 21000
       xmlDefaultSAXHandlerInit();
+#endif
       NSString_class = [NSString class];
       usSel = @selector(stringWithUTF8String:);
       usImp = (id (*)(id, SEL, const unsigned char*))
@@ -2669,12 +2671,12 @@ getEntityDefault(void *ctx, const xmlChar *name, BOOL resolve)
                   return NULL;
                 }
               ret->owner = 1;
-	      #if LIBXML_VERSION < 21100
+#if LIBXML_VERSION < 21100
               if (ret->checked == 0)
                 {
                   ret->checked = 1;
                 }
-	      #endif
+#endif
             }
         }
     }

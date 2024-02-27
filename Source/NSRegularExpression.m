@@ -18,8 +18,6 @@
    License along with this library; if not, write to the Free
    Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
    Boston, MA 02110 USA.
-
-   $Date: 2010-09-18 16:09:58 +0100 (Sat, 18 Sep 2010) $ $Revision: 31371 $
    */
 
 
@@ -46,13 +44,15 @@
 
 #define GSREGEXTYPE URegularExpression
 #import "GSICUString.h"
+#import "Foundation/NSDictionary.h"
+#import "Foundation/NSException.h"
 #import "Foundation/NSRegularExpression.h"
 #import "Foundation/NSTextCheckingResult.h"
 #import "Foundation/NSArray.h"
 #import "Foundation/NSCoder.h"
 #import "Foundation/NSUserDefaults.h"
 #import "Foundation/NSNotification.h"
-#import "Foundation/NSDictionary.h"
+#import "Foundation/FoundationErrors.h"
 #import "Foundation/NSError.h"
 
 /**
@@ -101,12 +101,15 @@ NSRegularExpressionOptionsToURegexpFlags(NSRegularExpressionOptions opts)
 @implementation NSRegularExpression
 
 + (NSRegularExpression*) regularExpressionWithPattern: (NSString*)aPattern
-  options: (NSRegularExpressionOptions)opts
-  error: (NSError**)e
+                                              options: (NSRegularExpressionOptions)opts
+                                                error: (NSError**)e
 {
-  return [[[self alloc] initWithPattern: aPattern
-				options: opts
-				  error: e] autorelease];
+  NSRegularExpression   *r;
+
+  r = [[self alloc] initWithPattern: aPattern
+                            options: opts
+                              error: e];
+  return AUTORELEASE(r);
 }
 
 
@@ -120,6 +123,17 @@ NSRegularExpressionOptionsToURegexpFlags(NSRegularExpressionOptions opts)
   UParseError	pe = {0};
   UErrorCode	s = 0;
 
+  // Raise an NSInvalidArgumentException to match macOS behaviour.
+  if (!aPattern)
+    {
+      NSException *exp;
+
+      exp = [NSException exceptionWithName: NSInvalidArgumentException
+                                    reason: @"nil argument"
+      				  userInfo: nil];
+      [exp raise];
+    }
+
 #if !__has_feature(blocks)
   if ([self class] != [NSRegularExpression class])
     {
@@ -132,16 +146,31 @@ NSRegularExpressionOptionsToURegexpFlags(NSRegularExpressionOptions opts)
   utext_close(&p);
   if (U_FAILURE(s))
     {
-      // FIXME: Do something sensible with the error parameter.
-      if (e != NULL)						/* CJEC, 6-Feb-23: Very basic NSError */
-      	{
-		NSString *		poszError;
-		
-		poszError = [NSString stringWithFormat: @"Could not create regular expression '%@'. ICU error %s", aPattern, u_errorName (s)];
-      	*e = [NSError errorWithDomain: @"ICU" code: s userInfo: [NSDictionary dictionaryWithObjectsAndKeys: poszError, NSLocalizedDescriptionKey, nil]];
-      	}
-      [self release];
-      return nil;
+      /* Match macOS behaviour if the pattern is invalid.
+       * Example:
+       *   Domain=NSCocoaErrorDomain
+       *   Code=2048 "The value “<PATTERN>” is invalid."
+       *   UserInfo={NSInvalidValue=<PATTERN>}
+       */
+      if (e)
+        {
+          NSDictionary  *userInfo;
+          NSString      *description;
+
+          description = [NSString stringWithFormat: @"The value “%@” is invalid.", aPattern];
+
+          userInfo = [NSDictionary dictionaryWithObjectsAndKeys:
+            aPattern, @"NSInvalidValue",
+            description, NSLocalizedDescriptionKey,
+            nil];
+
+          *e = [NSError errorWithDomain: NSCocoaErrorDomain
+                                   code: NSFormattingError
+                               userInfo: userInfo];
+        }
+
+      DESTROY(self);
+      return self;
     }
   options = opts;
   return self;
@@ -195,7 +224,7 @@ NSRegularExpressionOptionsToURegexpFlags(NSRegularExpressionOptions opts)
     }
   str = [GSUTextString new];
   utext_clone(&str->txt, t, FALSE, TRUE, &s);
-  return [str autorelease];
+  return AUTORELEASE(str);
 }
 #else
 - (id) initWithPattern: (NSString*)aPattern
@@ -220,8 +249,8 @@ NSRegularExpressionOptionsToURegexpFlags(NSRegularExpressionOptions opts)
   if (U_FAILURE(s))
     {
       // FIXME: Do something sensible with the error parameter.
-      [self release];
-      return nil;
+      DESTROY(self);
+      return self;
     }
   options = opts;
   return self;
@@ -261,8 +290,7 @@ NSRegularExpressionOptionsToURegexpFlags(NSRegularExpressionOptions opts)
             {
               return NO;
             }
-          return
-           (0 == memcmp((const void*)myText, (const void*)theirText, myLen));
+          return (0 == memcmp((const void*)myText, (const void*)theirText, myLen));
         }
     }
   else
@@ -318,12 +346,14 @@ static int32_t _workLimit = DEFAULT_WORK_LIMIT;
 
 + (void) _defaultsChanged: (NSNotification*)n
 {
-  NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
-  id value = [defs objectForKey: @"GSRegularExpressionWorkLimit"];
-  int32_t newLimit = DEFAULT_WORK_LIMIT;
+  NSUserDefaults        *defs = [NSUserDefaults standardUserDefaults];
+  id                    value = [defs objectForKey: @"GSRegularExpressionWorkLimit"];
+  int32_t               newLimit = DEFAULT_WORK_LIMIT;
+
   if ([value respondsToSelector: @selector(intValue)])
     {
-      int32_t v = [value intValue];
+      int32_t   v = [value intValue];
+
       if (v >= 0)
         {
           newLimit = v;
@@ -443,8 +473,10 @@ prepareResult(NSRegularExpression *regex,
     {
       NSInteger start = uregex_start(r, i, s);
       NSInteger end = uregex_end(r, i, s);
-      // The ICU API defines -1 as not found. Convert to
-      // NSNotFound if applicable.
+
+      /* The ICU API defines -1 as not found. Convert to
+       * NSNotFound if applicable.
+       */
       if (start == -1)
         {
           start = NSNotFound;
@@ -482,12 +514,12 @@ prepareResult(NSRegularExpression *regex,
                             range: (NSRange)range
                        usingBlock: (GSRegexBlock)block
 {
-  UErrorCode	s = 0;
-  UText		txt = UTEXT_INITIALIZER;
-  BOOL		stop = NO;
-  URegularExpression *r = setupRegex(regex, string, &txt, opts, range, block);
-  NSUInteger	groups = [self numberOfCaptureGroups] + 1;
-  NSRange	ranges[groups];
+  UErrorCode	        s = 0;
+  UText		        txt = UTEXT_INITIALIZER;
+  BOOL		        stop = NO;
+  URegularExpression    *r = setupRegex(regex, string, &txt, opts, range, block);
+  NSUInteger	        groups = [self numberOfCaptureGroups] + 1;
+  NSRange	        ranges[groups];
 
   // Should this throw some kind of exception?
   if (NULL == r)
@@ -540,12 +572,12 @@ prepareResult(NSRegularExpression *regex,
                             range: (NSRange)range
                        usingBlock: (GSRegexBlock)block
 {
-  UErrorCode	s = 0;
-  BOOL		stop = NO;
-  int32_t	length = [string length];
-  URegularExpression *r;
-  NSUInteger	groups = [self numberOfCaptureGroups] + 1;
-  NSRange	ranges[groups];
+  UErrorCode	        s = 0;
+  BOOL		        stop = NO;
+  int32_t	        length = [string length];
+  URegularExpression    *r;
+  NSUInteger	        groups = [self numberOfCaptureGroups] + 1;
+  NSRange	        ranges[groups];
   TEMP_BUFFER(buffer, length);
 
   r = setupRegex(regex, string, buffer, length, opts, range, block);
@@ -695,10 +727,11 @@ prepareResult(NSRegularExpression *regex,
 #  endif
 #if HAVE_UREGEX_OPENUTEXT
 #define FAKE_BLOCK_HACK(failRet, code) \
-  UErrorCode s = 0;\
-  UText txt = UTEXT_INITIALIZER;\
-  BOOL stop = NO;\
-  URegularExpression *r = setupRegex(regex, string, &txt, opts, range, 0);\
+  UErrorCode            s = 0;\
+  UText                 txt = UTEXT_INITIALIZER;\
+  BOOL                  stop = NO;\
+  URegularExpression    *r = setupRegex(regex, string, &txt, opts, range, 0);\
+\
   if (NULL == r) { return failRet; }\
   if (opts & NSMatchingAnchored)\
     {\
@@ -853,7 +886,7 @@ prepareResult(NSRegularExpression *regex,
     }
   utext_clone(&ret->txt, output, TRUE, TRUE, &s);
   [string setString: ret];
-  [ret release];
+  RELEASE(ret);
   uregex_close(r);
 
   utext_close(&txt);
