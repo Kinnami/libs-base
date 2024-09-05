@@ -13,7 +13,7 @@
 #define __has_extension(x) 0
 #endif
 
-#if __has_extension(c_atomic) || __has_extension(cxx_atomic)
+#if !defined(__OBJC__) && (__has_extension(c_atomic) || __has_extension(cxx_atomic))
 
 /*
  * Use native C11 atomic operations. _Atomic() should be defined by the
