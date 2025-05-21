@@ -122,6 +122,9 @@ GS_PRIVATE_INTERNAL(NSXMLDocument)
       int xmlOptions = XML_PARSE_NOERROR;
       xmlDocPtr doc = NULL;
 
+      // Adding in XML_PARSE_HUGE.
+      xmlOptions |= XML_PARSE_HUGE;
+
       if (!(mask & NSXMLNodePreserveWhitespace))
         {
           xmlOptions |= XML_PARSE_NOBLANKS;
@@ -433,7 +436,7 @@ GS_PRIVATE_INTERNAL(NSXMLDocument)
 #ifdef HAVE_LIBXSLT
   xmlChar **params = NULL;
   xmlDocPtr stylesheetDoc = xmlReadMemory([xslt bytes], [xslt length],
-                                          NULL, NULL, XML_PARSE_NOERROR | XML_PARSE_NONET);
+                                          NULL, NULL, XML_PARSE_NOERROR | XML_PARSE_NONET | XML_PARSE_HUGE);
   xsltStylesheetPtr stylesheet = xsltParseStylesheetDoc(stylesheetDoc);
   xmlDocPtr resultDoc = NULL;
  
