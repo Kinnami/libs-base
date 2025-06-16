@@ -2481,7 +2481,7 @@ static NSString	*endMarker = @"At end of incremental parse";
       ((xmlParserCtxtPtr)lib)->sax->resolveEntity = resolveEntityFunction;
 
       // Activate the XML_PARSE_HUGE option.
-      xmlCtxtSetOptions(lib, ((xmlParserCtxtPtr)lib)->options | XML_PARSE_HUGE);
+      xmlCtxtUseOptions(lib, ((xmlParserCtxtPtr)lib)->options | XML_PARSE_HUGE);
     }
   return YES;
 }
