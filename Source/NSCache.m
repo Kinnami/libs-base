@@ -18,8 +18,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */
 
 #import "common.h"
@@ -235,7 +234,8 @@
     }
 
   // Only evict if we need the space.
-  if (count > 0 && (spaceNeeded > 0 || count >= _countLimit))
+  if (count > 0
+    && (spaceNeeded > 0 || (_countLimit > 0 && count >= _countLimit)))
     {
       NSMutableArray *evictedKeys = nil;
       // Round up slightly.

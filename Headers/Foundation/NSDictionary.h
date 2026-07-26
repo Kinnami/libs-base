@@ -18,8 +18,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
   */
 
 #ifndef _NSDictionary_h_GNUSTEP_BASE_INCLUDE
@@ -40,7 +39,7 @@ extern "C" {
 GS_EXPORT_CLASS
 @interface GS_GENERIC_CLASS(NSDictionary,
   __covariant KeyT:id<NSCopying>, __covariant ValT)
-  : NSObject <NSCoding, NSCopying, NSMutableCopying, NSFastEnumeration>
+  : NSObject <NSCoding, NSSecureCoding, NSCopying, NSMutableCopying, NSFastEnumeration>
 + (instancetype) dictionary;
 + (instancetype) dictionaryWithContentsOfFile: (NSString*)path;
 #if OS_API_VERSION(GS_API_MACOSX, GS_API_LATEST)

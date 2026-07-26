@@ -9,6 +9,8 @@ Tests/base/*/GNUmakefile
 *.log
 *.sum
 Tools/BaseTools/dependencies
+Source/gnustep-base.pc
+Tools/Resources/autogsdoc/default-styles.css
 
 # Unit test byproducts
 *.err
@@ -82,4 +84,37 @@ DerivedData/
 ### Xcode Patch ###
 **/xcshareddata/WorkspaceSettings.xcsettings
 
+# clangd cache
+.cache
+
+# compile commands
+compile_commands.json
+
 # End of https://www.gitignore.io/api/xcode
+
+.cache
+compile_commands.json
+**.kdev4
+
+# Documentation
+Documentation/Base*
+Documentation/ReleaseNotes
+Documentation/ANNOUNCE
+Documentation/*.pdf
+Documentation/README
+Documentation/version.texi
+Documentation/*.aux
+Documentation/*.toc
+Documentation/General/General.igsdoc
+Documentation/General/General
+Documentation/INSTALL
+Documentation/NEWS
+Documentation/manual/manual.*
+Documentation/manual/gs-base.pdf
+**/dependencies
+Source/Base.gsdoc
+Source/BaseAdditions.gsdoc
+Documentation/manual/gs-base.info
+Documentation/manual/gs-base
+Documentation/gs-standards
+

@@ -22,8 +22,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    <title>NSNotificationCenter class reference</title>
 */
@@ -36,9 +35,13 @@
 #import "Foundation/NSLock.h"
 #import "Foundation/NSOperation.h"
 #import "Foundation/NSThread.h"
-#import "GNUstepBase/GSLock.h"
+#import "Foundation/NSHashTable.h"
 
 static NSZone	*_zone = 0;
+
+/* Cached class for fast test when removing observer.
+ */
+static Class	GSNotificationObserverClass = Nil;
 
 /**
  * Concrete class implementing NSNotification.
@@ -64,17 +67,25 @@ static Class concrete = 0;
     }
 }
 
-+ (NSNotification*) notificationWithName: (NSString*)name
++ (NSNotification*) notificationWithName: (NSNotificationName)name
 				  object: (id)object
 			        userInfo: (NSDictionary*)info
 {
-  GSNotification	*n;
+  return AUTORELEASE([[self allocWithZone: NSDefaultMallocZone()]
+    initWithName: name object: object userInfo: info]);
+}
 
-  n = (GSNotification*)NSAllocateObject(self, 0, NSDefaultMallocZone());
-  n->_name = [name copyWithZone: [self zone]];
-  n->_object = TEST_RETAIN(object);
-  n->_info = TEST_RETAIN(info);
-  return AUTORELEASE(n);
+- (instancetype) initWithName: (NSNotificationName)name
+		       object: (id)object
+		     userInfo: (NSDictionary*)info
+{
+  if ((self = [super init]))
+    {
+      _name = [name copyWithZone: [self zone]];
+      _object = TEST_RETAIN(object);
+      _info = TEST_RETAIN(info);
+    }
+  return self;
 }
 
 - (id) copyWithZone: (NSZone*)zone
@@ -100,7 +111,7 @@ static Class concrete = 0;
   [super dealloc];
 }
 
-- (NSString*) name
+- (NSNotificationName) name
 {
   return _name;
 }
@@ -129,17 +140,25 @@ struct	NCTbl;		/* Notification Center Table structure	*/
  * removed from, or not yet added to  any list).  The end of a
  * list is marked by 'next' being set to 'ENDOBS'.
  *
- * This is normally a structure which handles memory management using a fast
- * reference count mechanism, but when built with clang for GC, a structure
- * can't hold a zeroing weak pointer to an observer so it's implemented as a
- * trivial class instead ... and gets managed by the garbage collector.
+ * The observer is a weak reference to the observing object.
+ * The receiver is a strong reference to the observing object but
+ * exists only while we are in the process of posting a notification
+ * to that object (in which case the value of posting is the number
+ * of times the observation has been added to arrays for posting).
+ *
+ * The posting count records the number of times the Observation has
+ * been added to arrays for posting notification to observers, it is
+ * needed to track the situation where multiple threads are posting
+ * notifications to the same server at the same time.
  */
 
 typedef	struct	Obs {
-  id		observer;	/* Object to receive message.	*/
+  id		observer;	/* Reference to object.		*/
+  id		receiver;	/* Retained object (temporary). */
   SEL		selector;	/* Method selector.		*/
+  BOOL          owner;          /* If we own the observer.      */
+  int32_t	posting;	/* Retain count for structure.	*/
   struct Obs	*next;		/* Next item in linked list.	*/
-  int		retained;	/* Retain count for structure.	*/
   struct NCTbl	*link;		/* Pointer back to chunk table	*/
 } Observation;
 
@@ -182,17 +201,19 @@ static inline BOOL doEqual(BOOL shouldHash, NSString* key1, NSString* key2)
  */
 static void listFree(Observation *list);
 
-/* Observations have retain/release counts managed explicitly by fast
- * function calls.
- */
-static void obsRetain(Observation *o);
 static void obsFree(Observation *o);
+
+/* Observations have their 'posting' counts managed explicitly by fast
+ * function calls when thye are added to or removed from arrays.
+ */
+static void obsPost(Observation *o);
+static void obsDone(Observation *o);
 
 
 #define GSI_ARRAY_TYPES	0
 #define GSI_ARRAY_TYPE	Observation*
-#define GSI_ARRAY_RELEASE(A, X)   obsFree(X.ext)
-#define GSI_ARRAY_RETAIN(A, X)    obsRetain(X.ext)
+#define GSI_ARRAY_RELEASE(A, X)   obsDone(X.ext)
+#define GSI_ARRAY_RETAIN(A, X)    obsPost(X.ext)
 
 #include "GNUstepBase/GSIArray.h"
 
@@ -213,9 +234,9 @@ static void obsFree(Observation *o);
 /*
  * An NC table is used to keep track of memory allocated to store
  * Observation structures. When an Observation is removed from the
- * notification center, it's memory is returned to the free list of
+ * notification center, its memory is returned to the free list of
  * the chunk table, rather than being released to the general
- * memory allocation system.  This means that, once a large numbner
+ * memory allocation system.  This means that, once a large number
  * of observers have been registered, memory usage will never shrink
  * even if the observers are removed.  On the other hand, the process
  * of adding and removing observers is speeded up.
@@ -287,12 +308,17 @@ obsNew(NCTable *t, SEL s, id o)
   obs = t->freeList;
   t->freeList = (Observation*)obs->link;
   obs->link = (void*)t;
-  obs->retained = 0;
+  obs->posting = 0;
   obs->next = 0;
 
+  obs->receiver = nil;
   obs->selector = s;
-  obs->observer = o;
+  objc_initWeak(&obs->observer, o);
 
+  /* Instances of GSNotificationObserverClass are owned by the Observation
+   * and must be explicitly released when the observation is removed.
+   */
+  obs->owner = (GSNotificationObserverClass == object_getClass(o)) ? YES : NO;
   return obs;
 }
 
@@ -334,8 +360,7 @@ static void endNCTable(NCTable *t)
 
   TEST_RELEASE(t->_lock);
 
-  /*
-   * Free observations without notification names or numbers.
+  /* Free observations without notification names or numbers.
    */
   listFree(t->wildcard);
 
@@ -389,6 +414,7 @@ static void endNCTable(NCTable *t)
     }
   NSZoneFree(NSDefaultMallocZone(), t->chunks);
   NSZoneFree(NSDefaultMallocZone(), t);
+
 }
 
 static NCTable *newNCTable(void)
@@ -423,19 +449,59 @@ static inline void unlockNCTable(NCTable* t)
 
 static void obsFree(Observation *o)
 {
-  NSCAssert(o->retained >= 0, NSInternalInconsistencyException);
-  if (o->retained-- == 0)
-    {
-      NCTable	*t = o->link;
+  NCTable	*t;
 
+  o->next = 0;			// no longer in any active list
+  if (o->posting)
+    {
+      return;			// Defer until posting is done
+    }
+  
+  /* If we own the observer, we must release it as well as destroying
+   * the weak reference to it.
+   */
+  if (o->owner)
+    {
+      id	obj = objc_loadWeak(&o->observer);
+
+      [obj autorelease];	// Release to balance the fact we own it.
+      o->owner = NO;
+    }
+
+  objc_destroyWeak(&o->observer);
+
+  /* This observation can now be placed in the free list if there is one.
+   */
+  if ((t = o->link) != 0)
+    {
       o->link = (NCTable*)t->freeList;
       t->freeList = o;
     }
 }
 
-static void obsRetain(Observation *o)
+static void obsDone(Observation *o)
 {
-  o->retained++;
+  if (0 == --o->posting)
+    {
+      /* Posting to this observer is over, so we null-out the receiver
+       * and let it be deallocated if nobody else has retained it.
+       */
+      [o->receiver autorelease];
+      o->receiver = nil;
+
+      /* If the observation was removed from its linked list, it needs
+       * to be freed now it's no longer being p[osted to.
+       */
+      if (0 == o->next)
+	{
+	  obsFree(o);
+	}
+    }
+}
+
+static void obsPost(Observation *o)
+{
+  o->posting++;
 }
 
 static void listFree(Observation *list)
@@ -461,8 +527,10 @@ static void listFree(Observation *list)
 static Observation *listPurge(Observation *list, id observer)
 {
   Observation	*tmp;
+  id		o;
 
-  while (list != ENDOBS && list->observer == observer)
+  while (list != ENDOBS
+    && ((o = objc_loadWeak(&list->observer)) == observer || nil == o))
     {
       tmp = list->next;
       list->next = 0;
@@ -474,7 +542,7 @@ static Observation *listPurge(Observation *list, id observer)
       tmp = list;
       while (tmp->next != ENDOBS)
 	{
-	  if (tmp->next->observer == observer)
+	  if ((o = objc_loadWeak(&tmp->next->observer)) == observer || nil == o)
 	    {
 	      Observation	*next = tmp->next;
 
@@ -503,7 +571,7 @@ purgeMapNode(GSIMapTable map, GSIMapNode node, id observer)
 {
   Observation	*list = node->value.ext;
 
-  if (observer == 0)
+  if (nil == observer)
     {
       listFree(list);
       GSIMapRemoveKey(map, node->key);
@@ -530,14 +598,6 @@ purgeMapNode(GSIMapTable map, GSIMapNode node, id observer)
 	}
     }
 }
-
-/* purgeCollected() returns a list of observations with any observations for
- * a collected observer removed.
- * purgeCollectedFromMapNode() does the same thing but also handles cleanup
- * of the map node containing the list if necessary.
- */
-#define	purgeCollected(X)	(X)
-#define purgeCollectedFromMapNode(X, Y) ((Observation*)Y->value.ext)
 
 
 @interface GSNotificationBlockOperation : NSOperation
@@ -577,10 +637,6 @@ purgeMapNode(GSIMapTable map, GSIMapNode node, id observer)
 }
 
 @end
-
-/* Cached class for fast test when removing observer.
- */
-static Class	GSNotificationObserverClass = Nil;
 
 @interface GSNotificationObserver : NSObject
 {
@@ -662,14 +718,6 @@ static Class	GSNotificationObserverClass = Nil;
 
 static NSNotificationCenter *default_center = nil;
 
-+ (void) atExit
-{
-  id	tmp = default_center;
-
-  default_center = nil;
-  [tmp release];
-}
-
 + (void) initialize
 {
   if (self == [NSNotificationCenter class])
@@ -679,13 +727,20 @@ static NSNotificationCenter *default_center = nil;
 	{
 	  concrete = [GSNotification class];
 	}
+      /* Ensure value is initialised before we use it in
+       * -removeObserver:name:object:
+       */
+      if (nil == GSNotificationObserverClass)
+	{
+	  [GSNotificationObserver class];
+	}
+
       /*
        * Do alloc and init separately so the default center can refer to
        * the 'default_center' variable during initialisation.
        */
       default_center = [self alloc];
       [default_center init];
-      [self registerAtExit];
     }
 }
 
@@ -714,7 +769,7 @@ static NSNotificationCenter *default_center = nil;
 - (void) dealloc
 {
   [self finalize];
-
+   
   [super dealloc];
 }
 
@@ -750,10 +805,18 @@ static NSNotificationCenter *default_center = nil;
  * the notification center before releasing these objects.<br />
  * </p>
  *
+ * <p>While it is good practice to remove an observer before releasing it,  
+ * currently on MacOS it is possible to remove an observer even after the
+ * object has been deallocated. This is not documented behavior from Apple
+ * and could change at any time. In the interests of compatibility, this behavior
+ * will also be supported here.
+ * </p>
+ *
  * <p>NB. For MacOS-X compatibility, adding an observer multiple times will
  * register it to receive multiple copies of any matching notification, however
  * removing an observer will remove <em>all</em> of the multiple registrations.
  * </p>
+ *
  */
 - (void) addObserver: (id)observer
 	    selector: (SEL)selector
@@ -792,7 +855,6 @@ static NSNotificationCenter *default_center = nil;
    * once - in which case, the observer will receive multiple messages when
    * the notification is posted... odd, but the MacOS-X docs specify this.
    */
-
   if (name)
     {
       /*
@@ -802,13 +864,18 @@ static NSNotificationCenter *default_center = nil;
       if (n == 0)
 	{
 	  m = mapNew(TABLE);
-	  /*
-	   * As this is the first observation for the given name, we take a
+
+	  /* As this is the first observation for the given name, we take a
 	   * copy of the name so it cannot be mutated while in the map.
+	   *
+	   * We suppress static analyzer warnings about the copy (the
+	   * analyzer doesn't understand that we will release the name when
+	   * the map node is removed).
 	   */
-	  name = [name copyWithZone: NSDefaultMallocZone()];
-	  GSIMapAddPair(NAMED, (GSIMapKey)(id)name, (GSIMapVal)(void*)m);
-	  GS_CONSUMED(name)
+#ifdef	__clang_analyzer__
+	  [[clang::suppress]]
+#endif
+	  GSIMapAddPair(NAMED, (GSIMapKey)(id)[name copy], (GSIMapVal)(void*)m);
 	}
       else
 	{
@@ -881,6 +948,10 @@ static NSNotificationCenter *default_center = nil;
 	       name: name 
 	     object: object];
 
+  /* NB. The receiver takes ownership of the observer (without retaining)
+   * and will explicitly release it when the observation is removed, so we
+   * must not release it here.
+   */
   return observer;	// Released when observer is removed.
 }
 
@@ -906,7 +977,7 @@ static NSNotificationCenter *default_center = nil;
    *	of our map tables - while enumerating a table, it is safe to remove
    *	the entry returned by the enumerator.
    */
-
+  ENTER_POOL
   lockNCTable(TABLE);
 
   if (name == nil && object == nil)
@@ -1008,49 +1079,41 @@ static NSNotificationCenter *default_center = nil;
        * Locate the map table for this name.
        */
       n0 = GSIMapNodeForKey(NAMED, (GSIMapKey)((id)name));
-      if (n0 == 0)
+      if (n0)
 	{
-	  unlockNCTable(TABLE);
-	  return;		/* Nothing to do.	*/
-	}
-      m = (GSIMapTable)n0->value.ptr;
+	  m = (GSIMapTable)n0->value.ptr;
 
-      if (object == nil)
-	{
-	  e0 = GSIMapEnumeratorForMap(m);
-	  n0 = GSIMapEnumeratorNextNode(&e0);
-
-	  while (n0 != 0)
+	  if (object == nil)
 	    {
-	      GSIMapNode	next = GSIMapEnumeratorNextNode(&e0);
+	      e0 = GSIMapEnumeratorForMap(m);
+	      n0 = GSIMapEnumeratorNextNode(&e0);
 
-	      purgeMapNode(m, n0, observer);
-	      n0 = next;
+	      while (n0 != 0)
+		{
+		  GSIMapNode	next = GSIMapEnumeratorNextNode(&e0);
+
+		  purgeMapNode(m, n0, observer);
+		  n0 = next;
+		}
 	    }
-	}
-      else
-	{
-	  n0 = GSIMapNodeForSimpleKey(m, (GSIMapKey)object);
-	  if (n0 != 0)
+	  else
 	    {
-	      purgeMapNode(m, n0, observer);
+	      n0 = GSIMapNodeForSimpleKey(m, (GSIMapKey)object);
+	      if (n0 != 0)
+		{
+		  purgeMapNode(m, n0, observer);
+		}
 	    }
-	}
-      if (m->nodeCount == 0)
-	{
-	  mapFree(TABLE, m);
-	  GSIMapRemoveKey(NAMED, (GSIMapKey)((id)name));
+	  if (m->nodeCount == 0)
+	    {
+	      mapFree(TABLE, m);
+	      GSIMapRemoveKey(NAMED, (GSIMapKey)((id)name));
+	    }
 	}
     }
+
   unlockNCTable(TABLE);
-
-  /* As a special case GSNotificationObserver instances are owned by the
-   * notification center and are released when they are removed.
-   */
-  if (object_getClass(observer) == GSNotificationObserverClass)
-    {
-      RELEASE(observer);
-    }
+  LEAVE_POOL
 }
 
 /**
@@ -1065,6 +1128,52 @@ static NSNotificationCenter *default_center = nil;
   [self removeObserver: observer name: nil object: nil];
 }
 
+static Observation*
+addPost(Observation *head, GSIArray a)
+{
+  Observation	*p = 0;
+  Observation	*o = head;
+  Observation	*t;
+
+  while (o != ENDOBS)
+    {
+      t = o->next;
+
+      if (o->receiver)
+	{
+	  /* Posting already in progress, so we post to the same receiver.
+	   */
+          GSIArrayAddItem(a, (GSIArrayItem)o);
+	  p = o;
+	}
+      else if ((o->receiver = objc_loadWeakRetained(&o->observer)) != nil)
+	{
+	  /* We will start posting using a newly retained object as receiver.
+	   */
+          GSIArrayAddItem(a, (GSIArrayItem)o);
+	  p = o;
+	}
+      else
+	{
+	  /* The object has been deallocated ... remove the observation from
+	   * the list.
+	   */
+	  if (p)
+	    {
+	      p->next = t;
+	    }
+	  else
+	    {
+	      head = t;
+	    }
+	  o->next = 0;
+	  obsFree(o);
+	}
+      o = t;
+    }
+  return head;
+}
+
 
 /**
  * Private method to perform the actual posting of a notification.
@@ -1075,7 +1184,7 @@ static NSNotificationCenter *default_center = nil;
 {
   Observation	*o;
   unsigned	count;
-  NSString	*name = [notification name];
+  NSString	*name;
   id		object;
   GSIMapNode	n;
   GSIMapTable	m;
@@ -1083,52 +1192,48 @@ static NSNotificationCenter *default_center = nil;
   GSIArray_t	b;
   GSIArray	a = &b;
 
-  if (name == nil)
+  if ((name = [notification name]) == nil)
     {
       RELEASE(notification);
       [NSException raise: NSInvalidArgumentException
 		  format: @"Tried to post a notification with no name."];
     }
+
+  /* Do the rest in an autorelease pool so that the observers can be
+   * safely released (when the pool ends) outside our locked regions.
+   */
+  ENTER_POOL
+
   object = [notification object];
 
-  /*
-   * Lock the table of observations while we traverse it.
-   *
-   * The table of observations contains weak pointers which are zeroed when
-   * the observers get destroyed.  So to avoid consistency problems
-   * we use scanned memory in the array in the case where there are more
-   * than the 64 observers we allowed room for on the stack.
+  /* Lock the table of observations while we traverse it.
    */
   GSIArrayInitWithZoneAndStaticCapacity(a, _zone, 64, i);
+
   lockNCTable(TABLE);
 
-  /*
-   * Find all the observers that specified neither NAME nor OBJECT.
+  /* Find all the observers that specified neither NAME nor OBJECT.
    */
-  for (o = WILDCARD = purgeCollected(WILDCARD); o != ENDOBS; o = o->next)
-    {
-      GSIArrayAddItem(a, (GSIArrayItem)o);
-    }
+  WILDCARD = addPost(WILDCARD, a);
 
-  /*
-   * Find the observers that specified OBJECT, but didn't specify NAME.
+  /* Find the observers that specified OBJECT, but didn't specify NAME.
    */
   if (object)
     {
       n = GSIMapNodeForSimpleKey(NAMELESS, (GSIMapKey)object);
-      if (n != 0)
+      if (n)
 	{
-	  o = purgeCollectedFromMapNode(NAMELESS, n);
-	  while (o != ENDOBS)
+	  if (ENDOBS == (n->value.ext = addPost(n->value.ext, a)))
 	    {
-	      GSIArrayAddItem(a, (GSIArrayItem)o);
-	      o = o->next;
+	      GSIMapBucket bucket = GSIMapBucketForKey(NAMELESS, n->key);
+
+              GSIMapRemoveNodeFromMap(NAMELESS, bucket, n);
+              GSIMapFreeNode(NAMELESS, n);
 	    }
 	}
     }
 
-  /*
-   * Find the observers of NAME, except those observers with a non-nil OBJECT
+  /** Find the observers of NAME, except those observers with a non-nil OBJECT
    * that doesn't match the notification's OBJECT).
    */
   if (name)
@@ -1144,33 +1249,33 @@ static NSNotificationCenter *default_center = nil;
 	}
       if (m != 0)
 	{
-	  /*
-	   * First, observers with a matching object.
+	  /* First, observers with a matching object.
 	   */
 	  n = GSIMapNodeForSimpleKey(m, (GSIMapKey)object);
 	  if (n != 0)
 	    {
-	      o = purgeCollectedFromMapNode(m, n);
-	      while (o != ENDOBS)
+	      if (ENDOBS == (n->value.ext = addPost(n->value.ext, a)))
 		{
-		  GSIArrayAddItem(a, (GSIArrayItem)o);
-		  o = o->next;
+		  GSIMapBucket bucket = GSIMapBucketForKey(m, n->key);
+
+		  GSIMapRemoveNodeFromMap(m, bucket, n);
+		  GSIMapFreeNode(m, n);
 		}
 	    }
 
 	  if (object != nil)
 	    {
-	      /*
-	       * Now observers with a nil object.
+	      /* Now observers with a nil object.
 	       */
 	      n = GSIMapNodeForSimpleKey(m, (GSIMapKey)(id)nil);
 	      if (n != 0)
 		{
-	          o = purgeCollectedFromMapNode(m, n);
-		  while (o != ENDOBS)
+		  if (ENDOBS == (n->value.ext = addPost(n->value.ext, a)))
 		    {
-		      GSIArrayAddItem(a, (GSIArrayItem)o);
-		      o = o->next;
+		      GSIMapBucket bucket = GSIMapBucketForKey(m, n->key);
+
+		      GSIMapRemoveNodeFromMap(m, bucket, n);
+		      GSIMapFreeNode(m, n);
 		    }
 		}
 	    }
@@ -1181,8 +1286,7 @@ static NSNotificationCenter *default_center = nil;
    */
   unlockNCTable(TABLE);
 
-  /*
-   * Now send all the notifications.
+  /* Now send all the notifications.
    */
   count = GSIArrayCount(a);
   while (count-- > 0)
@@ -1192,7 +1296,7 @@ static NSNotificationCenter *default_center = nil;
 	{
           NS_DURING
             {
-              [o->observer performSelector: o->selector
+              [o->receiver performSelector: o->selector
                                 withObject: notification];
             }
           NS_HANDLER
@@ -1217,11 +1321,17 @@ static NSNotificationCenter *default_center = nil;
           NS_ENDHANDLER
 	}
     }
+
+  /* Cleanup of the array of observations must be lock protected.
+   */
   lockNCTable(TABLE);
   GSIArrayEmpty(a);
   unlockNCTable(TABLE);
 
+  /* Release the notification and any objects we autoreleased during posting
+   */
   RELEASE(notification);
+  LEAVE_POOL
 }
 
 

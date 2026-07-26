@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */ 
 
 #import "GSAvahiRunLoopIntegration.h"
@@ -503,11 +502,11 @@ GSAvahiTimeoutFree(AvahiTimeout* timeout)
   [lock lock];
   if ((rl == runLoop) && [mode isEqualToString: m])
     {
-      FOR_IN(GSAvahiWatcher*, child, children)
+      GS_FOR_IN(GSAvahiWatcher*, child, children)
         {
           [child unschedule];
         }
-      END_FOR_IN(children)
+      GS_END_FOR(children)
       runLoop = nil;
       [mode release];
       mode = nil;
@@ -524,11 +523,11 @@ GSAvahiTimeoutFree(AvahiTimeout* timeout)
     {
       runLoop = rl;
       ASSIGNCOPY(mode,m);
-      FOR_IN(GSAvahiWatcher*, child, children)
+      GS_FOR_IN(GSAvahiWatcher*, child, children)
         {
           [child reschedule];
         }
-      END_FOR_IN(children)
+      GS_END_FOR(children)
     }
   [lock unlock];
 }
@@ -542,11 +541,11 @@ GSAvahiTimeoutFree(AvahiTimeout* timeout)
   ap->userdata = (void*)NULL;
   [self removeFromRunLoop: runLoop
                   forMode: mode];
-  FOR_IN(GSAvahiWatcher*, child, children)
+  GS_FOR_IN(GSAvahiWatcher*, child, children)
     {
       [child setContext: nil];
     }
-  END_FOR_IN(children)
+  GS_END_FOR(children)
   free(ap);
   ap = NULL;
   [children release];

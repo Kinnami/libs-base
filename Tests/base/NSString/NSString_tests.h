@@ -39,7 +39,7 @@ Basic sanity test.
 */
 BOOL test_initWithCString(void)
 {
-  NSString *test1 = [[stringClass alloc] initWithCString: "ascii"];
+  NSString *test1 = AUTORELEASE([[stringClass alloc] initWithCString: "ascii"]);
   NSString *sanity = @"ascii";
 
   if (!test1)
@@ -117,9 +117,9 @@ test_encoding(void)
     NSData *d = [[NSData alloc] initWithBytes: "foo"  length: 3];
     NSString *s = [[stringClass alloc] initWithData: d  encoding: 0];
 
-    PASS(s == nil, "-initWithData:encoding: gives nil for invalid encodings")
-
     DESTROY(d);
+    PASS(s == nil, "-initWithData:encoding: gives nil for invalid encodings")
+    DESTROY(s);
   }
 
   test_encodings_helper(NSASCIIStringEncoding, 
@@ -175,10 +175,10 @@ test_encoding(void)
 BOOL test_getCString_maxLength_range_remainingRange(void)
 {
   NS_DURING
-    unsigned char *referenceBytes;
-    int referenceBytesLength;
+    unsigned char referenceBytes[4];
+    int referenceBytesLength = 4;
     NSString *referenceString;
-    unsigned char buffer[16];
+    char buffer[16];
     NSRange remainingRange;
     int i, j;
     BOOL ok = YES;
@@ -186,8 +186,7 @@ BOOL test_getCString_maxLength_range_remainingRange(void)
     switch ([NSString defaultCStringEncoding])
       {
 	case NSUTF8StringEncoding:
-	  referenceBytes =(unsigned char []){0x41, 0xc3, 0xa5, 0x42};
-	  referenceBytesLength = 4;
+	  memcpy(referenceBytes, (unsigned char []){0x41, 0xc3, 0xa5, 0x42}, 4);
 	  referenceString = [stringClass stringWithCharacters:
 	    (unichar []){0x41, 0xe5, 0x42}
 		  length: 3];
@@ -201,9 +200,9 @@ BOOL test_getCString_maxLength_range_remainingRange(void)
     for (i = 0; i < referenceBytesLength; i++)
       {
 	[referenceString getCString: buffer
-		maxLength: i
-		range: NSMakeRange(0, [referenceString length])
-		remainingRange: &remainingRange];
+	  maxLength: i
+	  range: NSMakeRange(0, [referenceString length])
+	  remainingRange: &remainingRange];
 
 	for (j = 0; j <= i ; j++)
 	  if (buffer[j] == 0 || buffer[j] != referenceBytes[j])

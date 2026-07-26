@@ -19,8 +19,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
-   MA 02111 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 */ 
 
 #ifndef __NSUserDefaults_h_OBJECTS_INCLUDE
@@ -190,6 +189,11 @@ GS_EXPORT NSString* const NSFormalName;
 /** Key for locale dictionary: name of locale. */
 GS_EXPORT NSString* const GSLocale;
 #endif
+#endif
+
+#if !NO_GNUSTEP
+/* Path to PEM Encoded Certificate File (NSString). Used by NSURLSession if set. */
+GS_EXPORT NSString *const GSCACertificateFilePath;
 #endif
 
 /* General implementation notes: 
@@ -519,6 +523,18 @@ GS_EXPORT_CLASS
  * available thereafter.
  */
 - (void) registerDefaults: (NSDictionary*)newVals;
+
+#if OS_API_VERSION(GS_API_NONE, GS_API_NONE)
+/** Writes dictionary to a file or removes empty defaults dictionary if
+ * supplied dictionary is nil.<br />
+ * GNUstep provides this method so that the process of writing a persistent
+ * domain may be overridden.  NB. this is not used on windows when defaults
+ * are saved to the windows registry.
+ */
+- (BOOL) writeDictionary: (NSDictionary*)dict
+                  toFile: (NSString*)file;
+#endif
+
 @end
 
 #if	defined(__cplusplus)

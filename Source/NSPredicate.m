@@ -22,8 +22,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */ 
 
 #import "common.h"
@@ -133,11 +132,35 @@ extern void     GSPropertyListMake(id,NSDictionary*,BOOL,BOOL,unsigned,id*);
 }
 @end
 
-@interface GSKeyPathCompositionExpression : NSExpression
+@interface GSBinaryExpression : NSExpression
 {
   @public
   NSExpression	*_left;
   NSExpression  *_right;
+}
+- (NSExpression *) leftExpression;
+- (NSExpression *) rightExpression;
+@end
+
+@interface GSKeyPathCompositionExpression : GSBinaryExpression
+@end
+
+@interface GSUnionSetExpression : GSBinaryExpression
+@end
+
+@interface GSIntersectSetExpression : GSBinaryExpression
+@end
+
+@interface GSMinusSetExpression : GSBinaryExpression
+@end
+
+@interface GSSubqueryExpression : NSExpression
+@end
+
+@interface GSAggregateExpression : NSExpression
+{
+  @public
+  id _collection;
 }
 @end
 
@@ -159,6 +182,8 @@ extern void     GSPropertyListMake(id,NSDictionary*,BOOL,BOOL,unsigned,id*);
 }
 
 - (instancetype) initWithBlock: (GSBlockPredicateBlock)block;
+- (id) copyWithZone: (NSZone *)z;
+
 @end
 
 
@@ -168,6 +193,8 @@ extern void     GSPropertyListMake(id,NSDictionary*,BOOL,BOOL,unsigned,id*);
 }
 - (instancetype) initWithBlock: (GSBlockPredicateBlock)block
                       bindings: (GS_GENERIC_CLASS(NSDictionary,NSString*,id)*)bindings;
+- (id) copyWithZone: (NSZone *)z;
+
 @end
 #endif
 
@@ -190,10 +217,9 @@ extern void     GSPropertyListMake(id,NSDictionary*,BOOL,BOOL,unsigned,id*);
   GSPredicateScanner	*s;
   NSPredicate		*p;
 
-  s = [[GSPredicateScanner alloc] initWithString: format
-                                            args: args];
+  s = AUTORELEASE([[GSPredicateScanner alloc] initWithString: format
+							args: args]);
   p = [s parse];
-  RELEASE(s);
   return p;
 }
 
@@ -323,10 +349,9 @@ extern void     GSPropertyListMake(id,NSDictionary*,BOOL,BOOL,unsigned,id*);
             }
         }
     }
-  s = [[GSPredicateScanner alloc] initWithString: format
-                                            args: arr];
+  s = AUTORELEASE([[GSPredicateScanner alloc] initWithString: format
+							args: arr]);
   p = [s parse];
-  RELEASE(s);
   return p;
 }
 
@@ -346,7 +371,8 @@ extern void     GSPropertyListMake(id,NSDictionary*,BOOL,BOOL,unsigned,id*);
 
 - (id) copyWithZone: (NSZone *)z
 {
-  return NSCopyObject(self, 0, z);
+  [self subclassResponsibility: _cmd];
+  return nil;
 }
 
 - (BOOL) evaluateWithObject: (id)object
@@ -485,7 +511,7 @@ extern void     GSPropertyListMake(id,NSDictionary*,BOOL,BOOL,unsigned,id*);
 - (void) dealloc
 {
   RELEASE(_subs);
-  [super dealloc];
+  DEALLOC
 }
 
 - (id) copyWithZone: (NSZone *)z
@@ -721,7 +747,7 @@ extern void     GSPropertyListMake(id,NSDictionary*,BOOL,BOOL,unsigned,id*);
 {
   RELEASE(_left);
   RELEASE(_right);
-  [super dealloc];
+  DEALLOC
 }
 
 - (NSComparisonPredicateModifier) comparisonPredicateModifier
@@ -901,18 +927,6 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 }
 #endif
 
-- (double) doubleValueFor: (id)value
-{
-  if ([value isKindOfClass: [NSDate class]])
-    {
-      return [(NSDate*)value timeIntervalSinceReferenceDate];
-    }
-  else
-    {
-      return [value doubleValue];
-    }
-}
-
 - (BOOL) _evaluateLeftValue: (id)leftResult
 		 rightValue: (id)rightResult
 		     object: (id)object
@@ -920,6 +934,8 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
   unsigned compareOptions = 0;
   BOOL leftIsNil;
   BOOL rightIsNil;
+  Class constantValueClass;
+  
 
   leftIsNil = (leftResult == nil || [leftResult isEqual: [NSNull null]]);
   rightIsNil = (rightResult == nil || [rightResult isEqual: [NSNull null]]);
@@ -957,35 +973,87 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
       compareOptions |= NSCaseInsensitiveSearch;
     }
 
-  /* This is a very optimistic implementation,
-   * hoping that the values are of the right type.
+  /* If the left or right result is a constant value expression, we need to
+   * extract the constant value from it.
    */
+  constantValueClass = [GSConstantValueExpression class];
+  if ([leftResult isKindOfClass: constantValueClass])
+    {
+      leftResult = [(GSConstantValueExpression *)leftResult constantValue];
+    }
+  if ([rightResult isKindOfClass: constantValueClass])
+    {
+      rightResult = [(GSConstantValueExpression *)rightResult constantValue];
+    }
+
+  /* We are assuming that the API is stable and enumeration values
+   * won't change. This covers:
+   * - NSLessThanPredicateOperatorType = 0,
+   * - NSLessThanOrEqualToPredicateOperatorType = 1,
+   * - NSGreaterThanPredicateOperatorType = 2,
+   * - NSGreaterThanOrEqualToPredicateOperatorType = 3
+   */
+  if (_type < NSEqualToPredicateOperatorType)
+    {
+      NSComparisonResult comparisonResult;
+      Class              stringClass;
+
+      stringClass = [NSString class];
+
+      /* We first check if the left and right result are strings.
+       * If this is not the case, check if we can do a comparison with
+       * doubleValue: (Mainly useful as a shortcut for expressions like
+       * "abc" == 3
+       */
+      if ([leftResult isKindOfClass:stringClass] &&
+          [rightResult isKindOfClass:stringClass])
+        {
+          comparisonResult = [leftResult compare:rightResult
+                                         options:compareOptions];
+        }
+      else if ([leftResult respondsToSelector:@selector(compare:)])
+        {
+          // Attempt a comparison
+          comparisonResult = [leftResult compare:rightResult];
+        }
+      else
+        {
+          // We can't compare these objects
+          [NSException raise:NSInvalidArgumentException
+                      format:@"Cannot compare objects of type %@ and %@",
+                             NSStringFromClass([leftResult class]),
+                             NSStringFromClass([rightResult class])];
+          return NO;
+        }
+
+      switch (_type)
+        {
+          case NSLessThanPredicateOperatorType:
+          {
+            return (comparisonResult == NSOrderedAscending) ? YES : NO;
+          }
+          case NSLessThanOrEqualToPredicateOperatorType:
+          {
+            /* True if left value is less then (NSOrderedAscending) or equal
+             * (NSOrderedSame) */
+            return (comparisonResult != NSOrderedDescending) ? YES : NO;
+          }
+          case NSGreaterThanPredicateOperatorType:
+          {
+            return (comparisonResult == NSOrderedDescending) ? YES : NO;
+          }
+          case NSGreaterThanOrEqualToPredicateOperatorType:
+          {
+            return (comparisonResult != NSOrderedAscending) ? YES : NO;
+          }
+        default: // This should never happen
+          return NO;
+        }
+    }
+
+  /* Handle remaining cases */
   switch (_type)
     {
-      case NSLessThanPredicateOperatorType:
-        {
-          double ld = [self doubleValueFor: leftResult];
-          double rd = [self doubleValueFor: rightResult];
-          return (ld < rd) ? YES : NO;
-        }
-      case NSLessThanOrEqualToPredicateOperatorType:
-        {
-          double ld = [self doubleValueFor: leftResult];
-          double rd = [self doubleValueFor: rightResult];
-          return (ld <= rd) ? YES : NO;
-        }
-      case NSGreaterThanPredicateOperatorType:
-        {
-          double ld = [self doubleValueFor: leftResult];
-          double rd = [self doubleValueFor: rightResult];
-          return (ld > rd) ? YES : NO;
-        }
-      case NSGreaterThanOrEqualToPredicateOperatorType:
-        {
-          double ld = [self doubleValueFor: leftResult];
-          double rd = [self doubleValueFor: rightResult];
-          return (ld >= rd) ? YES : NO;
-        }
       case NSEqualToPredicateOperatorType:
 	return [leftResult isEqual: rightResult];
       case NSNotEqualToPredicateOperatorType:
@@ -1169,10 +1237,10 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 {
   GSConstantValueExpression *e;
 
-  e = [[GSConstantValueExpression alloc] 
-          initWithExpressionType: NSConstantValueExpressionType];
+  e = AUTORELEASE([[GSConstantValueExpression alloc] 
+    initWithExpressionType: NSConstantValueExpressionType]);
   ASSIGN(e->_obj, obj);
-  return AUTORELEASE(e);
+  return e;
 }
 
 + (NSExpression *) expressionForEvaluatedObject
@@ -1186,8 +1254,8 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
   GSFunctionExpression	*e;
   NSString		*s;
 
-  e = [[GSFunctionExpression alloc]
-    initWithExpressionType: NSFunctionExpressionType];
+  e = AUTORELEASE([[GSFunctionExpression alloc]
+    initWithExpressionType: NSFunctionExpressionType]);
   s = [NSString stringWithFormat: @"_eval_%@:", name];
   e->_selector = NSSelectorFromString(s);
   if (![e respondsToSelector: e->_selector])
@@ -1203,7 +1271,7 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
   else if ([name isEqualToString: @"_mul"]) e->_op = @"*";
   else if ([name isEqualToString: @"_div"]) e->_op = @"/";
   else if ([name isEqualToString: @"_pow"]) e->_op = @"**";
-  return AUTORELEASE(e);
+  return e;
 }
 
 + (NSExpression *) expressionForKeyPath: (NSString *)path
@@ -1215,10 +1283,10 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
       [NSException raise: NSInvalidArgumentException
 		  format: @"Keypath is not NSString: %@", path];
     }
-  e = [[GSKeyPathExpression alloc] 
-          initWithExpressionType: NSKeyPathExpressionType];
+  e = AUTORELEASE([[GSKeyPathExpression alloc] 
+    initWithExpressionType: NSKeyPathExpressionType]);
   ASSIGN(e->_keyPath, path);
-  return AUTORELEASE(e);
+  return e;
 }
 
 + (NSExpression *) expressionForKeyPathCompositionWithLeft: (NSExpression*)left
@@ -1226,22 +1294,115 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 {
   GSKeyPathCompositionExpression *e;
 
-  e = [[GSKeyPathCompositionExpression alloc] 
-    initWithExpressionType: NSKeyPathCompositionExpressionType];
+  e = AUTORELEASE([[GSKeyPathCompositionExpression alloc] 
+    initWithExpressionType: NSKeyPathCompositionExpressionType]);
   ASSIGN(e->_left, left);
   ASSIGN(e->_right, right);
-  return AUTORELEASE(e);
+  return e;
 }
 
 + (NSExpression *) expressionForVariable: (NSString *)string
 {
   GSVariableExpression *e;
 
-  e = [[GSVariableExpression alloc] 
-          initWithExpressionType: NSVariableExpressionType];
+  e = AUTORELEASE([[GSVariableExpression alloc] 
+    initWithExpressionType: NSVariableExpressionType]);
   ASSIGN(e->_variable, string);
-  return AUTORELEASE(e);
+  return e;
 }
+
+// 10.5 methods...
++ (NSExpression *) expressionForIntersectSet: (NSExpression *)left
+                                        with: (NSExpression *)right
+{
+  GSIntersectSetExpression *e;
+
+  e = AUTORELEASE([[GSIntersectSetExpression alloc]
+    initWithExpressionType: NSIntersectSetExpressionType]);
+  ASSIGN(e->_left, left);
+  ASSIGN(e->_right, right);
+  
+  return e;
+}
+
++ (NSExpression *) expressionForAggregate: (NSArray *)subExpressions
+{
+  GSAggregateExpression *e;
+
+  e = AUTORELEASE([[GSAggregateExpression alloc]
+    initWithExpressionType: NSAggregateExpressionType]);
+  ASSIGN(e->_collection, [NSSet setWithArray: subExpressions]);
+  
+  return e;
+}
+
++ (NSExpression *) expressionForUnionSet: (NSExpression *)left
+                                    with: (NSExpression *)right
+{
+  GSUnionSetExpression *e;
+
+  e = AUTORELEASE([[GSUnionSetExpression alloc]
+    initWithExpressionType: NSUnionSetExpressionType]);
+  ASSIGN(e->_left, left);
+  ASSIGN(e->_right, right);
+  
+  return e;
+}
+
++ (NSExpression *) expressionForMinusSet: (NSExpression *)left
+                                    with: (NSExpression *)right
+{
+  GSMinusSetExpression *e;
+
+  e = AUTORELEASE([[GSMinusSetExpression alloc]
+    initWithExpressionType: NSMinusSetExpressionType]);
+  ASSIGN(e->_left, left);
+  ASSIGN(e->_right, right);
+  
+  return e;
+}
+// end 10.5 methods
+
+// 10.6 methods...
++ (NSExpression *) expressionWithFormat: (NSString *)format, ...
+{
+  va_list ap;
+  NSExpression *obj;
+
+  if (NULL == format)
+    {
+      [NSException raise: NSInvalidArgumentException
+		  format: @"[NSExpression+expressionWithFormat:]: NULL format"];
+    }
+
+  va_start(ap, format);
+  obj = [self expressionWithFormat: format
+			 arguments: ap];
+  va_end(ap);
+
+  return obj;
+}
+
++ (NSExpression *) expressionWithFormat: (NSString *)format
+			      arguments: (va_list)args
+{
+  NSString *expString = AUTORELEASE([[NSString alloc] initWithFormat: format
+							   arguments: args]);
+  GSPredicateScanner *scanner = AUTORELEASE([[GSPredicateScanner alloc]
+					      initWithString: expString
+							args: nil]);
+  return [scanner parseExpression];
+}
+
++ (NSExpression *) expressionWithFormat: (NSString *)format
+			  argumentArray: (NSArray *)args
+{
+  GSPredicateScanner *scanner = AUTORELEASE([[GSPredicateScanner alloc]
+					      initWithString: format
+							args: args]);
+  return [scanner parseExpression];
+}
+// End 10.6 methods
 
 - (id) initWithExpressionType: (NSExpressionType)type
 {
@@ -1306,6 +1467,24 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 }
 
 - (NSString *) variable
+{
+  [self subclassResponsibility: _cmd];
+  return nil;
+}
+
+- (NSExpression *) leftExpression
+{
+  [self subclassResponsibility: _cmd];
+  return nil;
+}
+
+- (NSExpression *) rightExpression
+{
+  [self subclassResponsibility: _cmd];
+  return nil;
+}
+
+- (id) collection
 {
   [self subclassResponsibility: _cmd];
   return nil;
@@ -1400,7 +1579,7 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 - (void) dealloc
 {
   RELEASE(_obj);
-  [super dealloc];
+  DEALLOC
 }
 
 - (id) copyWithZone: (NSZone*)zone
@@ -1464,7 +1643,7 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 - (void) dealloc;
 {
   RELEASE(_variable);
-  [super dealloc];
+  DEALLOC
 }
 
 - (id) copyWithZone: (NSZone*)zone
@@ -1513,7 +1692,7 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 - (void) dealloc;
 {
   RELEASE(_keyPath);
-  [super dealloc];
+  DEALLOC
 }
 
 - (id) copyWithZone: (NSZone*)zone
@@ -1528,6 +1707,37 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 - (id) _expressionWithSubstitutionVariables: (NSDictionary *)variables
 {
   return self;
+}
+
+@end
+
+@implementation GSBinaryExpression
+
+- (id) copyWithZone: (NSZone*)zone
+{
+  GSBinaryExpression	*copy;
+
+  copy = (GSBinaryExpression *)[super copyWithZone: zone];
+  copy->_left = [_left copyWithZone: zone];
+  copy->_right = [_right copyWithZone: zone];
+  return copy;
+}
+
+- (void) dealloc
+{
+  RELEASE(_left);
+  RELEASE(_right);
+  DEALLOC
+}
+
+- (NSExpression *) leftExpression
+{
+  return _left;
+}
+
+- (NSExpression *) rightExpression
+{
+  return _right;
 }
 
 @end
@@ -1551,23 +1761,6 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
   return nil;
 }
 
-- (void) dealloc
-{
-  RELEASE(_left);
-  RELEASE(_right);
-  [super dealloc];
-}
-
-- (id) copyWithZone: (NSZone*)zone
-{
-  GSKeyPathCompositionExpression *copy;
-
-  copy = (GSKeyPathCompositionExpression *)[super copyWithZone: zone];
-  copy->_left = [_left copyWithZone: zone];
-  copy->_right = [_right copyWithZone: zone];
-  return copy;
-}
-
 - (id) _expressionWithSubstitutionVariables: (NSDictionary*)variables
 {
   NSExpression	*left;
@@ -1579,6 +1772,156 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 							 right: right];
 }
 
+@end
+
+// Macro for checking set related expressions
+#define CHECK_SETS \
+do { \
+  if ([rightValue isKindOfClass: [NSArray class]]) \
+    { \
+      rightSet = [NSSet setWithArray: rightValue]; \
+    } \
+  if (!rightSet) \
+    { \
+      [NSException raise: NSInvalidArgumentException \
+	          format: @"Can't evaluate set expression; right subexpression is not a set (lhs = %@ rhs = %@)", leftValue, rightValue]; \
+    } \
+  if ([leftValue isKindOfClass: [NSArray class]]) \
+    { \
+      leftSet = [NSSet setWithArray: leftValue]; \
+    } \
+  if (!leftSet) \
+    { \
+      [NSException raise: NSInvalidArgumentException \
+	          format: @"Can't evaluate set expression; left subexpression is not a set (lhs = %@ rhs = %@)", leftValue, rightValue]; \
+    } \
+ } while (0)
+
+@implementation GSUnionSetExpression
+
+- (NSString *) description
+{
+  return [NSString stringWithFormat: @"%@.%@", _left, _right];
+}
+
+- (id) expressionValueWithObject: (id)object
+			 context: (NSMutableDictionary *)context
+{
+  id leftValue = [_left expressionValueWithObject: object context: context];
+  id rightValue = [_right expressionValueWithObject: object context: context];
+  NSSet *leftSet = nil;
+  NSSet *rightSet = nil;
+  NSMutableSet *result = nil;
+
+  CHECK_SETS;
+    
+  result = [NSMutableSet setWithSet: leftSet];
+  [result unionSet: rightSet];
+
+  return result;  
+}
+
+@end
+
+@implementation GSIntersectSetExpression
+
+- (NSString *) description
+{
+  return [NSString stringWithFormat: @"%@.%@", _left, _right];
+}
+
+- (id) expressionValueWithObject: (id)object
+			 context: (NSMutableDictionary *)context
+{
+  id leftValue = [_left expressionValueWithObject: object context: context];
+  id rightValue = [_right expressionValueWithObject: object context: context];
+  NSSet *leftSet = nil;
+  NSSet *rightSet = nil;
+  NSMutableSet *result = nil;
+
+  CHECK_SETS;
+  
+  result = [NSMutableSet setWithSet: leftSet];
+  [result intersectSet: rightSet];
+
+  return result;
+}
+
+@end
+
+@implementation GSMinusSetExpression
+
+- (NSString *) description
+{
+  return [NSString stringWithFormat: @"%@.%@", _left, _right];
+}
+
+- (id) expressionValueWithObject: (id)object
+			 context: (NSMutableDictionary *)context
+{
+  id leftValue = [_left expressionValueWithObject: object context: context];
+  id rightValue = [_right expressionValueWithObject: object context: context];
+  NSSet *leftSet = nil;
+  NSSet *rightSet = nil;
+  NSMutableSet *result = nil;
+
+  CHECK_SETS;
+  
+  result = [NSMutableSet setWithSet: leftSet];
+  [result minusSet: rightSet];
+
+  return result;
+}
+
+@end
+
+@implementation GSSubqueryExpression
+@end
+
+@implementation GSAggregateExpression
+
+- (id) copyWithZone: (NSZone*)zone
+{
+  GSAggregateExpression *copy;
+
+  copy = (GSAggregateExpression *)[super copyWithZone: zone];
+  copy->_collection = [_collection copyWithZone: zone];
+  return copy;
+}
+
+- (void) dealloc
+{
+  DESTROY(_collection);
+  DEALLOC
+}
+
+- (NSString *) description
+{
+  return [NSString stringWithFormat: @"%@", _collection];
+}
+
+- (id) collection
+{
+  return _collection;
+}
+
+- (id) expressionValueWithObject: (id)object
+			 context: (NSMutableDictionary *)context
+{ 
+  NSMutableArray	*result = [NSMutableArray arrayWithCapacity:
+						    [_collection count]];
+
+  GS_FOR_IN(NSExpression*, exp, _collection)
+    {
+      NSExpression *value;
+
+      value = [exp expressionValueWithObject: object context: context];
+      [result addObject: value];
+    }
+  GS_END_FOR(_collection);
+
+  return result;
+}
 @end
 
 @implementation GSFunctionExpression
@@ -1656,7 +1999,7 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 {
   RELEASE(_args);
   RELEASE(_function);
-  [super dealloc];
+  DEALLOC
 }
 
 - (id) copyWithZone: (NSZone*)zone
@@ -2290,12 +2633,12 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
       lp = [NSComparisonPredicate predicateWithLeftExpression: left 
                                   rightExpression: lexp
                                   modifier: modifier 
-                                  type: NSGreaterThanPredicateOperatorType 
+                                  type: NSGreaterThanOrEqualToPredicateOperatorType 
                                   options: opts];
       up = [NSComparisonPredicate predicateWithLeftExpression: left 
                                   rightExpression: uexp
                                   modifier: modifier 
-                                  type: NSLessThanPredicateOperatorType 
+                                  type: NSLessThanOrEqualToPredicateOperatorType 
                                   options: opts];
       return [NSCompoundPredicate andPredicateWithSubpredicates: 
                                        [NSArray arrayWithObjects: lp, up, nil]];
@@ -2341,7 +2684,6 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 
 - (NSExpression *) parseExpression
 {
-//  return [self parseAdditionExpression];
   return [self parseBinaryExpression];
 }
 
@@ -2779,12 +3121,10 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
   
   while (YES)
     {
-      NSExpression *right;
-
       if ([self scanString: @":=" intoString: NULL])	// assignment
         {
           // check left to be a variable?
-          right = [self parseAdditionExpression];
+          [self parseAdditionExpression];
           // FIXME
         }
       else
@@ -2814,8 +3154,8 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
 - (instancetype) predicateWithSubstitutionVariables: 
   (GS_GENERIC_CLASS(NSDictionary,NSString*,id)*)variables
 {
-  return [[[GSBoundBlockPredicate alloc] initWithBlock: _block
-                                              bindings: variables] autorelease];
+  return AUTORELEASE([[GSBoundBlockPredicate alloc] initWithBlock: _block
+							 bindings: variables]);
 }
 
 - (BOOL) evaluateWithObject: (id)object
@@ -2831,11 +3171,19 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
             substitutionVariables: nil];
 }
 
+- (id) copyWithZone: (NSZone *) z
+{
+  Class c;
+
+  c = [self class];
+  return [[c allocWithZone: z] initWithBlock: _block];
+}
+
 - (void) dealloc
 {
   [(id)_block release];
   _block = NULL;
-  [super dealloc];
+  DEALLOC
 }
 
 - (NSString*) predicateFormat
@@ -2864,10 +3212,18 @@ GSICUStringMatchesRegex(NSString *string, NSString *regex, NSStringCompareOption
             substitutionVariables: _bindings];
 }
 
+- (id) copyWithZone: (NSZone *) z
+{
+  Class c;
+
+  c = [self class];
+  return [[c allocWithZone: z] initWithBlock: _block bindings: _bindings];
+}
+
 - (void) dealloc
 {
   DESTROY(_bindings);
-  [super dealloc];
+  DEALLOC
 }
 @end
 

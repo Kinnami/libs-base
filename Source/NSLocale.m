@@ -18,8 +18,7 @@
    You should have received a copy of the GNU Lesser General Public
    License along with this library; see the file COPYING.LIB.
    If not, see <http://www.gnu.org/licenses/> or write to the
-   Free Software Foundation, 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301, USA.
+   Free Software Foundation, 31 Milk Street #960789 Boston, MA 02196 USA.
 */
 
 #define	EXPOSE_NSLocale_IVARS	1
@@ -37,7 +36,6 @@
 #import "Foundation/NSUserDefaults.h"
 #import "Foundation/NSString.h"
 #import "GNUstepBase/NSMutableString+GNUstepBase.h"
-#import "GNUstepBase/GSLock.h"
 
 #if	defined(HAVE_UNICODE_ULOC_H)
 # include <unicode/uloc.h>
@@ -156,7 +154,7 @@ static NSRecursiveLock *classLock = nil;
 
   defs = [NSUserDefaults standardUserDefaults];
   name = [defs stringForKey: @"Locale"];
-  if ([name isEqual: autoupdatingLocale->_localeId] == NO)
+  if (name != nil && [name isEqual: autoupdatingLocale->_localeId] == NO)
     {
       [classLock lock];
       RELEASE(autoupdatingLocale->_localeId);
@@ -748,9 +746,12 @@ static NSRecursiveLock *classLock = nil;
   newLocale = [allLocales objectForKey: localeId];
   if (nil == newLocale)
     {
-      _localeId = [localeId copy];
-      _components = [[NSMutableDictionary alloc] initWithCapacity: 0];
-      [allLocales setObject: self forKey: localeId];
+      if (nil != (self = [super init]))
+	{
+	  _localeId = [localeId copy];
+	  _components = [[NSMutableDictionary alloc] initWithCapacity: 0];
+	  [allLocales setObject: self forKey: localeId];
+	}
     }
   else
     {

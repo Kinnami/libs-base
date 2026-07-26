@@ -21,8 +21,7 @@
  * 
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free
- * Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110 USA.
+ * Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
  */ 
 
 #ifndef __NSMapTable_h_GNUSTEP_BASE_INCLUDE
@@ -67,26 +66,6 @@ GS_EXPORT_CLASS
  */
 + (instancetype) mapTableWithKeyOptions: (NSPointerFunctionsOptions)keyOptions
                            valueOptions: (NSPointerFunctionsOptions)valueOptions;
-
-/** Convenience method for creating a map table to store object values
- * using object keys.
- */
-+ (instancetype) mapTableWithStrongToStrongObjects;
-
-/** Convenience method for creating a map table to store non-retained
- * object values with retained object keys.
- */
-+ (instancetype) mapTableWithStrongToWeakObjects;
-
-/** Convenience method for creating a map table to store retained
- * object values with non-retained object keys.
- */
-+ (instancetype) mapTableWithWeakToStrongObjects;
-
-/** Convenience method for creating a map table to store non-retained
- * object values with non-retained object keys.
- */
-+ (instancetype) mapTableWithWeakToWeakObjects;
 
 /** Convenience method for creating a map table to store object values
  * using object keys.  The collection will retain both the key and the value.
@@ -156,9 +135,11 @@ GS_EXPORT_CLASS
 - (void) removeObjectForKey: (GS_GENERIC_TYPE(KeyT))aKey;
 
 /** Store the object under the specified key, replacing any object which
- * was previously stored under that key.
+ * was previously stored under that key.<br />
+ * Calling the method with eitther a nil key or a nil value has no effect.
  */
-- (void) setObject: (GS_GENERIC_TYPE(ValT))anObject forKey: (GS_GENERIC_TYPE(KeyT))aKey;
+- (void) setObject: (GS_GENERIC_TYPE(ValT))anObject
+	    forKey: (GS_GENERIC_TYPE(KeyT))aKey;
 
 /** Return an NSPointerFunctions value describind the functions used by the
  * receiver to handle values.

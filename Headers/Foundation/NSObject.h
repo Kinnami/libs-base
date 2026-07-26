@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    AutogsdocSource: NSObject.m
    */ 
@@ -294,11 +293,11 @@ extern "C" {
  * documentation for [NSCoder], [NSUnarchiver], [NSKeyedUnarchiver], and/or
  * [NSPortCoder] for more information.
  */
-- (id) initWithCoder: (NSCoder*)aDecoder;
+- (id) initWithCoder: (NSCoder*)aDecoder NS_REPLACES_RECEIVER;
 @end
 
 @protocol NSSecureCoding <NSCoding>
-+ (BOOL)supportsSecureCoding;
++ (BOOL) supportsSecureCoding;
 @end
 
 
@@ -385,7 +384,7 @@ GS_EXPORT_CLASS GS_ROOT_CLASS
 + (void) setVersion: (NSInteger)aVersion;
 + (NSInteger) version;
 
-- (id) awakeAfterUsingCoder: (NSCoder*)aDecoder;
+- (id) awakeAfterUsingCoder: (NSCoder*)aDecoder NS_REPLACES_RECEIVER;
 - (Class) classForArchiver;
 - (Class) classForCoder;
 - (id) copy;
@@ -501,11 +500,6 @@ GS_EXPORT void
 NSIncrementExtraRefCount(id anObject);
 
 #if OS_API_VERSION(GS_API_NONE, GS_API_NONE)
-
-/** Global lock to be used by classes when operating on any global
-    data that invoke other methods which also access global; thus,
-    creating the potential for deadlock. */
-GS_EXPORT NSRecursiveLock *gnustep_global_lock;
 
 @interface NSObject (NEXTSTEP)
 - (id) error:(const char *)aString, ...;

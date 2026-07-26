@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    AutogsdocSource: NSKeyedArchiver.m
    AutogsdocSource: NSKeyedUnarchiver.m
@@ -274,6 +273,7 @@ GS_EXPORT_CLASS
 #endif
   NSZone	*_zone;		/* Zone for allocating objs.	*/
   BOOL          _requiresSecureCoding;
+  NSSet		*_allowedClasses; /* Current secure-coding allowed set (not retained; owned by the caller for the duration of a decode). */
 #endif
 #if     GS_NONFRAGILE
 #else
@@ -561,7 +561,7 @@ willReplaceObject: (id)anObject
  * returned, it is used to replace anObject.
  */
 - (id) unarchiver: (NSKeyedUnarchiver*)anUnarchiver
-  didDecodeObject: (id)anObject;
+  didDecodeObject: (id) NS_CONSUMED anObject NS_RETURNS_RETAINED;
 
 /**
  * Sent when unarchiving is about to complete.

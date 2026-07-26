@@ -22,8 +22,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    <title>NSRunLoop class reference</title>
    $Date$ $Revision$
@@ -64,13 +63,7 @@
 
 #if GS_USE_LIBDISPATCH_RUNLOOP
 #  define RL_INTEGRATE_DISPATCH 1
-#  ifdef HAVE_DISPATCH_H
-#    include <dispatch.h>
-#  elif HAVE_DISPATCH_PRIVATE_H
-#    include <dispatch/private.h>
-#  elif HAVE_DISPATCH_DISPATCH_H
-#    include <dispatch/dispatch.h>
-#  endif
+#  import "GSDispatch.h"
 #endif
 
 
@@ -426,6 +419,12 @@ static inline BOOL timerInvalidated(NSTimer *t)
 #if HAVE_DISPATCH_MAIN_QUEUE_DRAIN_NP
   dispatch_main_queue_drain_np();
 #elif HAVE__DISPATCH_MAIN_QUEUE_CALLBACK_4CF
+#if defined(__linux__)
+  uint64_t value;
+  int fd = (int)(intptr_t)data;
+  int n = eventfd_read(fd, &value);
+  (void) n;
+#endif
   _dispatch_main_queue_callback_4CF(NULL);
 #else
 #error libdispatch missing main queue callback function
@@ -762,6 +761,13 @@ static inline BOOL timerInvalidated(NSTimer *t)
     }
 }
 
+/* Declare the drainer at file scope so that the clang analyzer will not
+ * report it as leaked.
+ */
+#ifdef RL_INTEGRATE_DISPATCH
+static GSMainQueueDrainer 	*drainer = nil;
+#endif
+
 + (NSRunLoop*) _runLoopForThread: (NSThread*) aThread
 {
   GSRunLoopThreadInfo	*info = GSRunLoopInfoForThread(aThread);
@@ -800,19 +806,23 @@ static inline BOOL timerInvalidated(NSTimer *t)
                                            userInfo: nil
                                             repeats: YES];
           [current addTimer: timer forMode: NSDefaultRunLoopMode];
+	  RELEASE(timer);	// Retained in run loop until invalidated
 
           #ifdef RL_INTEGRATE_DISPATCH
-          // We leak the queue drainer, because it's integral part of RL
-          // operations
-          GSMainQueueDrainer *drain =
-            [NSObject leak: [[GSMainQueueDrainer new] autorelease]];
+	  if (nil == drainer)
+	    {
+	      /* We leak the queue drainer, because it's integral part of RL
+	       * operations
+	       */
+	      drainer = [GSMainQueueDrainer new];
+	    }
           [current addEvent: [GSMainQueueDrainer mainQueueFileDescriptor]
 #ifdef _WIN32
                        type: ET_HANDLE
 #else
                        type: ET_RDESC
 #endif
-                    watcher: drain
+                    watcher: drainer
                     forMode: NSDefaultRunLoopMode];
 
           #endif

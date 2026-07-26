@@ -8,11 +8,16 @@
 
 int main(int argc, char **argv, char **env)
 {
-  CREATE_AUTORELEASE_POOL(arp);
+  START_SET("test02")
   NSFileManager *fm;
   NSBundle *bundle;
   BOOL loaded;
   NSString *helperPath;
+
+#if defined(_WIN64) && defined(_MSC_VER)
+//  SKIP("NSURLConnection tests fail on 64-bit Windows with Clang/MSVC.")
+  testHopeful = YES;
+#endif
 
   // load the test suite's classes
   fm = [NSFileManager defaultManager];
@@ -21,27 +26,15 @@ int main(int argc, char **argv, char **env)
   bundle = [NSBundle bundleWithPath: helperPath];
   loaded = [bundle load];
 
-  if(loaded)
+  if (loaded)
     {
       NSDictionary *d;
       Class testClass;
       NSDictionary *refs;
       TestWebServer *server;
       NSURLConnectionTest *testCase;
-      BOOL debug = NO;
+      BOOL debug = GSDebugSet(@"dflt");
   
-  /* The following test cases depend on the GSInetServerStream
-   * class which is completely broken on Windows.
-   *
-   * See: https://github.com/gnustep/libs-base/issues/266
-   *
-   * We will mark the test cases as hopeful on Windows.
-   */
-#if defined(_WIN32)
-  NSLog(@"Marking local web server tests as hopeful because GSInetServerStream is broken on Windows");
-  testHopeful = YES;
-#endif
-
       testClass = [bundle principalClass]; // NSURLConnectionTest
 
       // create a shared TestWebServer instance for performance
@@ -142,11 +135,7 @@ int main(int argc, char **argv, char **env)
 		  format: @"can't load bundle TestConnection"];
     }
 
-#if defined(_WIN32)
-  testHopeful = NO;
-#endif
-
-  DESTROY(arp);
+  END_SET("test02")
   
   return 0;
 }

@@ -17,8 +17,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    */
 
@@ -178,6 +177,7 @@ static int	tuneSndBuf = 0;
    * that multiple processes can serve the same port simultaneously.
    * We don't want that broken behavior!
    */
+  value = 1;
   if (setsockopt(desc, SOL_SOCKET, SO_REUSEADDR, (char*)&value, sizeof(value))
     < 0)
     {
@@ -489,8 +489,6 @@ GSPrivateSockaddrSetup(NSString *machine, uint16_t port,
 
 + (void) initialize
 {
-  GSMakeWeakPointer(self, "istream");
-  GSMakeWeakPointer(self, "ostream");
 }
 
 + (void) tryInput: (GSSocketInputStream*)i output: (GSSocketOutputStream*)o
@@ -1812,6 +1810,11 @@ setNonBlocking(SOCKET fd)
 	    {
 	      result = GSPrivateSockaddrHost((struct sockaddr*)&sin);
 	    }
+	  else
+	    {
+	      // Assume we are not yet connected.
+	      result = GSPrivateSockaddrHost((struct sockaddr*)&_address);
+	    }
 	}
       else if ([key isEqualToString: GSStreamRemotePortKey])
 	{
@@ -1858,6 +1861,10 @@ setNonBlocking(SOCKET fd)
 {
   uint16_t	p = (uint16_t)port;
 
+  if (nil == address)
+    {
+      return NO;
+    }
   switch (family)
     {
       case AF_INET:
@@ -2001,7 +2008,6 @@ setNonBlocking(SOCKET fd)
 
 + (void) initialize
 {
-  GSMakeWeakPointer(self, "_sibling");
   if (self == [GSSocketInputStream class])
     {
       GSObjCAddClassBehavior(self, [GSSocketStream class]);
@@ -2328,13 +2334,11 @@ setNonBlocking(SOCKET fd)
 	  error = WSAGetLastError();
           NSDebugMLLog(@"NSStream", @"%@ Error %d", self, error);
 	}
-#ifndef	NDEBUG
       else
 	{
 	  NSDebugMLLog(@"NSStream", @"%@ EVENTS 0x%lx",
 	    self, events.lNetworkEvents);
 	}
-#endif
 
       if ([self streamStatus] == NSStreamStatusOpening)
 	{
@@ -2390,7 +2394,8 @@ setNonBlocking(SOCKET fd)
 	   * signalled again.
 	   */
 	  while ([_sibling _unhandledData] == NO
-	    && [_sibling hasSpaceAvailable])
+	    && [_sibling hasSpaceAvailable]
+	    && 0 == (events.lNetworkEvents & FD_CLOSE))
 	    {
 	      [_sibling _sendEvent: NSStreamEventHasSpaceAvailable];
 	    }
@@ -2496,7 +2501,6 @@ setNonBlocking(SOCKET fd)
 
 + (void) initialize
 {
-  GSMakeWeakPointer(self, "_sibling");
   if (self == [GSSocketOutputStream class])
     {
       GSObjCAddClassBehavior(self, [GSSocketStream class]);
@@ -2849,13 +2853,11 @@ setNonBlocking(SOCKET fd)
 	  error = WSAGetLastError();
           NSDebugMLLog(@"NSStream", @"%@ Error %d", self, error);
 	}
-#ifndef	NDEBUG
       else
 	{
 	  NSDebugMLLog(@"NSStream", @"%@ EVENTS 0x%lx",
 	    self, events.lNetworkEvents);
 	}
-#endif
 
       if ([self streamStatus] == NSStreamStatusOpening)
 	{
@@ -2908,7 +2910,8 @@ setNonBlocking(SOCKET fd)
 	   * failure/closure or a write blocked and we have not been
 	   * signalled again.
 	   */
-	  while ([self _unhandledData] == NO && [self hasSpaceAvailable])
+	  while ([self _unhandledData] == NO && [self hasSpaceAvailable]
+	    && 0 == (events.lNetworkEvents & FD_CLOSE))
 	    {
 	      [self _sendEvent: NSStreamEventHasSpaceAvailable];
 	    }
@@ -3009,7 +3012,6 @@ setNonBlocking(SOCKET fd)
 
 + (void) initialize
 {
-  GSMakeWeakPointer(self, "_sibling");
   if (self == [GSSocketServerStream class])
     {
       GSObjCAddClassBehavior(self, [GSSocketStream class]);
@@ -3380,7 +3382,7 @@ setNonBlocking(SOCKET fd)
 
 - (id) initToAddr: (NSString*)addr port: (NSInteger)port
 {
-  if ([super init] != nil)
+  if ((self = [super init]) != nil)
     {
       if ([addr length] == 0)
         {

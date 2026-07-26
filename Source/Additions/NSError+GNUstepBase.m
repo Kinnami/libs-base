@@ -18,8 +18,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02111 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
 */
 
@@ -48,7 +47,7 @@ strerror_r(int eno, char *buf, int len)
   const char *ptr;
   int   result;
 
-  [gnustep_global_lock lock];
+  [GSPrivateGlobalLock() lock];
   ptr = strerror(eno);
   if (ptr == 0)
     {
@@ -61,7 +60,7 @@ strerror_r(int eno, char *buf, int len)
       result = 0;
     }
   buf[len - 1] = '\0';
-  [gnustep_global_lock unlock];
+  [GSPrivateGlobalLock() unlock];
   return result;
 }
 #else

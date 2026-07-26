@@ -16,7 +16,7 @@
    You should have received a copy of the GNU General Public
    License along with this program; see the file COPYINGv3.
    If not, write to the Free Software Foundation,
-   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+   31 Milk Street #960789 Boston, MA 02196 USA.
 
    */
 
@@ -25,6 +25,7 @@
 #import	"Foundation/NSArray.h"
 #import	"Foundation/NSAutoreleasePool.h"
 #import	"Foundation/NSDictionary.h"
+#import	"Foundation/NSPathUtilities.h"
 #import	"Foundation/NSUserDefaults.h"
 #import "AGSIndex.h"
 #import "GNUstepBase/NSString+GNUstepBase.h"
@@ -279,7 +280,10 @@ findKey(id refs, NSString *key, NSMutableArray *path, NSMutableArray *found)
 
 - (id) init
 {
-  refs = [[NSMutableDictionary alloc] initWithCapacity: 8];
+  if (nil != (self = [super init]))
+    {
+      refs = [[NSMutableDictionary alloc] initWithCapacity: 8];
+    }
   return self;
 }
 
@@ -291,7 +295,6 @@ findKey(id refs, NSString *key, NSMutableArray *path, NSMutableArray *found)
 - (void) makeRefs: (GSXMLNode*)node
 {
   GSXMLNode	*children = [node firstChild];
-  GSXMLNode	*next = [node next];
   BOOL		newUnit = NO;
 
   if ([node type] == XML_ELEMENT_NODE)
@@ -541,19 +544,16 @@ findKey(id refs, NSString *key, NSMutableArray *path, NSMutableArray *found)
 	}
     }
 
-  if (children != nil)
+  while (children)
     {
       [self makeRefs: children];
+      children = [children next];
     }
   if (newUnit == YES)
     {
       unit = nil;
       category = nil;
       classname = nil;
-    }
-  if (next != nil)
-    {
-      [self makeRefs: next];
     }
 }
 
@@ -638,6 +638,35 @@ findKey(id refs, NSString *key, NSMutableArray *path, NSMutableArray *found)
     }
 }
 
+- (void) setInstallDir: (NSString*)dir inDomain: (int)domain
+{
+  NSString	*domainName = nil;
+
+  if (NSSystemDomainMask == domain) domainName = @"SYSTEM";
+  else if (NSLocalDomainMask == domain) domainName = @"LOCAL";
+  else if (NSNetworkDomainMask == domain) domainName = @"NETWORK";
+  else if (NSUserDomainMask == domain) domainName = @"USER";
+  else domainName = @"LOCAL";
+
+  if (domainName)
+    {
+      [refs setObject: domainName forKey: @"InstallationDomain"];
+    }
+  else
+    {
+      [refs removeObjectForKey: @"InstallationDomain"];
+    }
+
+  if (dir)
+    {
+      [refs setObject: dir forKey: @"InstallDirectory"];
+    }
+  else
+    {
+      [refs removeObjectForKey: @"InstallationDomain"];
+    }
+}
+
 - (NSDictionary*) authors
 {
   return [refs objectForKey: @"author"];
@@ -706,7 +735,14 @@ findKey(id refs, NSString *key, NSMutableArray *path, NSMutableArray *found)
       [refs setObject: dict forKey: @"output"];
       RELEASE(dict);
     }
-  [dict setObject: a forKey: h];
+  if ([a count] == 0)
+    {
+      [dict removeObjectForKey: h];
+    }
+  else
+    {
+      [dict setObject: a forKey: h];
+    }
 }
 
 - (void) setRelationship: (NSString*)r from: (NSString*)from to: (NSString*)to

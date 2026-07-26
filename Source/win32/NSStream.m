@@ -17,8 +17,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02111 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    */
 #include "common.h"
@@ -36,6 +35,7 @@
 #import "Foundation/NSByteOrder.h"
 #import "Foundation/NSURL.h"
 #import "GNUstepBase/NSObject+GNUstepBase.h"
+#import "GNUstepBase/GSTLS.h"
 
 #import "../GSPrivate.h"
 #import "../GSStream.h"
@@ -940,7 +940,8 @@
               inputStream: (NSInputStream **)inputStream 
              outputStream: (NSOutputStream **)outputStream
 {
-  NSString *address = host ? (id)[host address] : (id)@"127.0.0.1";
+  NSString	*address = host ? (id)[host address] : (id)@"127.0.0.1";
+  NSString	*name = [host name];
   GSSocketStream *ins = nil;
   GSSocketStream *outs = nil;
   int sock;
@@ -959,6 +960,11 @@
       outs = AUTORELEASE([[GSInet6OutputStream alloc]
         initToAddr: address port: port]);
 #endif
+    }
+  if (name)
+    {
+      if (ins) [ins setProperty: name forKey: GSTLSServerName];
+      if (outs) [outs setProperty: name forKey: GSTLSServerName];
     }
 
   /*

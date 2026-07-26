@@ -30,8 +30,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    <title>NSFileManager class reference</title>
    $Date$ $Revision$
@@ -44,6 +43,7 @@
 #import "common.h"
 #define	EXPOSE_NSFileManager_IVARS	1
 #define	EXPOSE_NSDirectoryEnumerator_IVARS	1
+#import "Foundation/FoundationErrors.h"
 #import "Foundation/NSArray.h"
 #import "Foundation/NSAutoreleasePool.h"
 #import "Foundation/NSData.h"
@@ -152,10 +152,10 @@
 #include <sys/stat.h>
 #endif
 
-#if	defined(HAVE_SYS_FCNTL_H)
-#  include	<sys/fcntl.h>
-#elif	defined(HAVE_FCNTL_H)
+#if	defined(HAVE_FCNTL_H)
 #  include	<fcntl.h>
+#elif	defined(HAVE_SYS_FCNTL_H)
+#  include	<sys/fcntl.h>
 #endif
 
 #ifdef HAVE_PWD_H
@@ -176,6 +176,11 @@
 #else
 #define	GSBINIO	0
 #endif
+
+@interface NSError (NSFileManager)
++ (NSError*) _error: (NSInteger)aCode
+	description: (NSString*)description;
+@end
 
 @interface NSDirectoryEnumerator (Local)
 - (id) initWithDirectoryPath: (NSString*)path 
@@ -273,7 +278,7 @@ static Class	GSAttrDictionaryClass = 0;
 @end
 
 
-gs_thread_key_t thread_last_error_key;
+static gs_thread_key_t thread_last_error_key;
 
 static void GS_WINAPI
 exitedThread(void *lastErrorPtr)
@@ -322,8 +327,10 @@ exitedThread(void *lastErrorPtr)
                              toPath: (NSString*) toPath;
 
 /* Thread-local last error variable. */
-- (NSString*) _lastError;
-- (void) _setLastError: (NSString*)error;
+- (NSError*) _lastError;
+- (NSString*) _lastErrorText;
+- (void) _setLastError: (NSString*)msg code: (int)code;
+- (void) _setLastError: (NSString*)msg;
 
 /* A convenience method to return an NSError object.
  * If the _lastError message is set, this creates an NSError using
@@ -348,8 +355,9 @@ exitedThread(void *lastErrorPtr)
 
 // Getting the default manager
 
-static NSFileManager* defaultManager = nil;
+static NSFileManager	*defaultManager = nil;
 static NSStringEncoding	defaultEncoding;
+static gs_mutex_t       classLock = GS_MUTEX_INIT_STATIC;
 
 + (NSFileManager*) defaultManager
 {
@@ -357,17 +365,17 @@ static NSStringEncoding	defaultEncoding;
     {
       NS_DURING
 	{
-	  [gnustep_global_lock lock];
+	  GS_MUTEX_LOCK(classLock);
 	  if (defaultManager == nil)
 	    {
 	      defaultManager = [[self alloc] init];
 	    }
-	  [gnustep_global_lock unlock];
+	  GS_MUTEX_UNLOCK(classLock);
 	}
       NS_HANDLER
 	{
 	  // unlock then re-raise the exception
-	  [gnustep_global_lock unlock];
+	  GS_MUTEX_UNLOCK(classLock);
 	  [localException raise];
 	}
       NS_ENDHANDLER
@@ -379,12 +387,15 @@ static NSStringEncoding	defaultEncoding;
 {
   defaultEncoding = [NSString defaultCStringEncoding];
   GSAttrDictionaryClass = [GSAttrDictionary class];
-  GS_THREAD_KEY_INIT(thread_last_error_key, exitedThread);
+  if (!GS_THREAD_KEY_INIT(thread_last_error_key, exitedThread))
+    {
+      NSLog(@"Problem initialising thread error key");
+    }
 }
 
 - (void) dealloc
 {
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
   [super dealloc];
 }
 
@@ -486,14 +497,14 @@ static NSStringEncoding	defaultEncoding;
 #if     defined(HAVE_GETPWNAM)
 	  struct passwd *pw;
 
-          [gnustep_global_lock lock];
+          GS_MUTEX_LOCK(classLock);
 	  pw = getpwnam([str cStringUsingEncoding: defaultEncoding]);
 	  if (pw != 0)
 	    {
 	      ok = (chown(lpath, pw->pw_uid, -1) == 0);
 	      (void)chown(lpath, -1, pw->pw_gid);
 	    }
-          [gnustep_global_lock unlock];
+          GS_MUTEX_UNLOCK(classLock);
 #endif
 #endif
 #endif
@@ -550,14 +561,14 @@ static NSStringEncoding	defaultEncoding;
 #ifdef HAVE_GETGRNAM
       struct group *gp;
       
-      [gnustep_global_lock lock];
+      GS_MUTEX_LOCK(classLock);
       gp = getgrnam([str cStringUsingEncoding: defaultEncoding]);
       if (gp)
 	{
 	  if (chown(lpath, -1, gp->gr_gid) == 0)
 	    ok = YES;
 	}
-      [gnustep_global_lock unlock];
+      GS_MUTEX_UNLOCK(classLock);
 #endif
 #endif
 #endif
@@ -827,7 +838,7 @@ static NSStringEncoding	defaultEncoding;
   NSDirectoryEnumerator *direnum;
   NSString              *path;
   
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   if (![[url scheme] isEqualToString: @"file"])
     {
@@ -888,13 +899,13 @@ static NSStringEncoding	defaultEncoding;
   return result;  
 }
 
-- (NSURL *)URLForDirectory: (NSSearchPathDirectory)directory 
+- (NSURL*) URLForDirectory: (NSSearchPathDirectory)directory 
                   inDomain: (NSSearchPathDomainMask)domain 
-         appropriateForURL: (NSURL *)url 
+         appropriateForURL: (NSURL*)url 
                     create: (BOOL)shouldCreate 
-                     error: (NSError **)error
+                     error: (NSError**)error
 {
-  NSString *path = nil;
+  NSString	*path = nil;
 
   if (directory == NSItemReplacementDirectory)
     {
@@ -902,7 +913,9 @@ static NSStringEncoding	defaultEncoding;
     }
   else
     {
-      NSArray *pathArray = NSSearchPathForDirectoriesInDomains(directory, domain, YES);
+      NSArray	*pathArray;
+
+      pathArray = NSSearchPathForDirectoriesInDomains(directory, domain, YES);
 
       if ([pathArray count] > 0)
         {
@@ -911,14 +924,29 @@ static NSStringEncoding	defaultEncoding;
     }
 
   if (shouldCreate && ![self fileExistsAtPath: path])
-      {
-        [self       createDirectoryAtPath: path
-              withIntermediateDirectories: YES
-                               attributes: nil
-                                    error: error];
-      }
+    {
+      [self createDirectoryAtPath: path
+      withIntermediateDirectories: YES
+		       attributes: nil
+			    error: error];
+    }
   
   return [NSURL fileURLWithPath: path];
+}
+
+- (GS_GENERIC_CLASS(NSArray, NSURL*)*)
+  URLsForDirectory: (NSSearchPathDirectory)directory
+  inDomains: (NSSearchPathDomainMask)domain
+{
+  NSArray		*paths;
+  NSMutableArray	*urls;
+
+  paths = NSSearchPathForDirectoriesInDomains(directory, domain, YES);
+  urls = [NSMutableArray arrayWithCapacity: [paths count]];
+  GS_FOR_IN(NSString*, path, paths)
+    [urls addObject: [NSURL fileURLWithPath: path]];
+  GS_END_FOR(paths)
+  return urls;
 }
 
 - (NSDirectoryEnumerator*) enumeratorAtURL: (NSURL*)url
@@ -931,7 +959,7 @@ static NSStringEncoding	defaultEncoding;
   BOOL                  shouldRecurse;
   BOOL                  shouldSkipHidden;
 
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   if (![[url scheme] isEqualToString: @"file"])
     {
@@ -968,14 +996,14 @@ static NSStringEncoding	defaultEncoding;
                                 errorHandler: handler
                                          for: self];
 
-  return direnum;  
+  return AUTORELEASE(direnum);  
 }
 
 - (NSArray*) contentsOfDirectoryAtPath: (NSString*)path error: (NSError**)error
 {
   NSArray       *result;
 
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   result = [self directoryContentsAtPath: path];
 
@@ -1005,7 +1033,7 @@ static NSStringEncoding	defaultEncoding;
 {
   BOOL result = NO;
 
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   if (YES == flag)
     {
@@ -1301,10 +1329,17 @@ static NSStringEncoding	defaultEncoding;
 
 /**
  * Copies the file or directory at source to destination, using a
- * handler object which should respond to
+ * handler object which may respond to
  * [NSObject(NSFileManagerHandler)-fileManager:willProcessPath:] and
  * [NSObject(NSFileManagerHandler)-fileManager:shouldProceedAfterError:]
  * messages.<br />
+ * If the handler responds to the first message, it is used to inform the
+ * handler when an item is about to be copied.  If the handler responds
+ * to the second message, it is used to ask the handler whether to
+ * continue with the copy after an error (when there is no handler the
+ * processing stops at the point when an error occurs).<br />
+ * Symbolic links are copied themselved rather than causing the items
+ * they link to be copied.<br />
  * Will not copy to a destination which already exists.
  */
 - (BOOL) copyPath: (NSString*)source
@@ -1316,11 +1351,15 @@ static NSStringEncoding	defaultEncoding;
 
   if ([self fileExistsAtPath: destination] == YES)
     {
+      [self _setLastError: @"Could not copy - destination already exists"
+		     code: NSFileWriteFileExistsError];
       return NO;
     }
   attrs = [self fileAttributesAtPath: source traverseLink: NO];
   if (attrs == nil)
     {
+      [self _setLastError: @"Could not copy - source is not available"
+		     code: NSFileReadNoSuchFileError];
       return NO;
     }
   fileType = [attrs fileType];
@@ -1346,7 +1385,8 @@ static NSStringEncoding	defaultEncoding;
       if ([[destination stringByAppendingString: @"/"]
 	hasPrefix: [source stringByAppendingString: @"/"]])
 	{
-	  [self _setLastError: @"Could not copy - destination is a descendant of source"];
+	  [self _setLastError:
+	    @"Could not copy - destination is a descendant of source"];
 	  return NO;
 	}
 
@@ -1354,11 +1394,30 @@ static NSStringEncoding	defaultEncoding;
 
       if ([self createDirectoryAtPath: destination attributes: attrs] == NO)
 	{
-          return [self _proceedAccordingToHandler: handler
-					 forError: [self _lastError]
-					   inPath: destination
-					 fromPath: source
-					   toPath: destination];
+          if (NO == [self _proceedAccordingToHandler: handler
+					    forError: [self _lastErrorText]
+					      inPath: destination
+					    fromPath: source
+					      toPath: destination])
+	    {
+	      return NO;
+	    }
+	  else
+	    {
+	      BOOL	dirOK;
+
+	      /* We may have managed to create the directory but not set
+	       * its attributes ... if so we can continue copying.
+	       */
+	      if (![self fileExistsAtPath: destination isDirectory: &dirOK])
+		{
+		  dirOK = NO;
+		}
+	      if (!dirOK)
+		{
+		  return NO;
+		}
+	    }
 	}
 
       if ([self _copyPath: source toPath: destination handler: handler] == NO)
@@ -1408,7 +1467,7 @@ static NSStringEncoding	defaultEncoding;
 {
   BOOL  result;
 
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   result = [self copyPath: src toPath: dst handler: nil];
 
@@ -1435,7 +1494,12 @@ static NSStringEncoding	defaultEncoding;
  * handler object which should respond to
  * [NSObject(NSFileManagerHandler)-fileManager:willProcessPath:] and
  * [NSObject(NSFileManagerHandler)-fileManager:shouldProceedAfterError:]
- * messages.
+ * messages.<br />
+ * If the handler responds to the first message, it is used to inform the
+ * handler when an item is about to be moved.  If the handler responds
+ * to the second message, it is used to ask the handler whether to
+ * continue with the move after an error (when there is no handler the
+ * processing stops at the point when an error occurs).<br />
  * Will not move to a destination which already exists.<br />
  */
 - (BOOL) movePath: (NSString*)source
@@ -1523,7 +1587,7 @@ static NSStringEncoding	defaultEncoding;
 {
   BOOL  result;
 
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   result = [self movePath: src toPath: dst handler: nil];
   
@@ -1602,7 +1666,7 @@ static NSStringEncoding	defaultEncoding;
       if ([self createDirectoryAtPath: destination attributes: attrs] == NO)
 	{
           return [self _proceedAccordingToHandler: handler
-					 forError: [self _lastError]
+					 forError: [self _lastErrorText]
 					   inPath: destination
 					 fromPath: source
 					   toPath: destination];
@@ -1683,7 +1747,11 @@ static NSStringEncoding	defaultEncoding;
 
       if (res == WIN32ERR)
 	{
-	  return NO;
+	  NSString	*message = [[NSError _last] localizedDescription];
+
+	  return [self _proceedAccordingToHandler: handler
+					 forError: message
+					   inPath: path];
 	}
       if (res & FILE_ATTRIBUTE_DIRECTORY)
 	{
@@ -1698,7 +1766,11 @@ static NSStringEncoding	defaultEncoding;
 
       if (lstat(lpath, &statbuf) != 0)
 	{
-	  return NO;
+	  NSString	*message = [[NSError _last] localizedDescription];
+
+	  return [self _proceedAccordingToHandler: handler
+					 forError: message
+					   inPath: path];
 	}
       is_dir = ((statbuf.st_mode & S_IFMT) == S_IFDIR);
 #endif /* _WIN32 */
@@ -1766,7 +1838,7 @@ static NSStringEncoding	defaultEncoding;
 {
   BOOL  result;
 
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   result = [self removeFileAtPath: path handler: nil];
 
@@ -1793,7 +1865,7 @@ static NSStringEncoding	defaultEncoding;
 {
   BOOL  result;
 
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   result = [self createSymbolicLinkAtPath: path pathContent: destPath];
 
@@ -2254,7 +2326,7 @@ static NSStringEncoding	defaultEncoding;
 {
   NSDictionary	*d;
 
-  [self _setLastError: nil];
+  [self _setLastError: nil code: 0];
 
   d = [GSAttrDictionaryClass attributesAt: path traverseLink: NO];
   
@@ -2805,12 +2877,44 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
 {
   if (GSIArrayCount(_stack) > 0)
     {
+      _flags.currentIsDir = NO;
       GSIArrayRemoveLastItem(_stack);
       if (_currentFilePath != 0)
 	{
 	  DESTROY(_currentFilePath);
 	}
     }
+}
+
+/**
+ * An alias for skipDescendents that fixes the typo in the method name.
+ */
+- (void) skipDescendants
+{
+  [self skipDescendents];
+}
+
+/**
+ * Returns the number of levels the current file is nested in the
+ * directory hierarchy. The level of the initial directory is 0,
+ * so all files immediately in that directory are at level 1.
+ */
+- (NSUInteger) level
+{
+  /* NB Apple's implementation returns 1 after the last file (and also
+   * before the first one), so we do that here, too.
+   */
+  NSUInteger level = GSIArrayCount(_stack);
+  if (level == 0)
+    {
+      level = 1;
+    }
+  else if (_flags.currentIsDir)
+    {
+      NSParameterAssert(level > 1);
+      level--;
+    }
+  return level;
 }
 
 /*
@@ -2828,6 +2932,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
 {
   NSString      *returnFileName = nil;
 
+  _flags.currentIsDir = NO;
   if (_currentFilePath != 0)
     {
       DESTROY(_currentFilePath);
@@ -2951,6 +3056,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
 #endif
 
 		      GSIArrayAddItem(_stack, item);
+                      _flags.currentIsDir = YES;
 		    }
 		  else
 		    {
@@ -3374,7 +3480,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
 	  if (dirOK == NO)
 	    {
               if (![self _proceedAccordingToHandler: handler
-					   forError: [self _lastError]
+					   forError: [self _lastErrorText]
 					     inPath: destinationFile
 					   fromPath: sourceFile
 					     toPath: destinationFile])
@@ -3382,8 +3488,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
                   result = NO;
 		  break;
                 }
-	      /*
-	       * We may have managed to create the directory but not set
+	      /* We may have managed to create the directory but not set
 	       * its attributes ... if so we can continue copying.
 	       */
 	      if (![self fileExistsAtPath: destinationFile isDirectory: &dirOK])
@@ -3481,7 +3586,7 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
 			       attributes: attributes] == NO)
 	    {
               if ([self _proceedAccordingToHandler: handler
-					  forError: [self _lastError]
+					  forError: [self _lastErrorText]
 					    inPath: destinationFile
 					  fromPath: sourceFile
 					    toPath: destinationFile] == NO)
@@ -3563,8 +3668,14 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
   if ([handler respondsToSelector:
     @selector (fileManager:shouldProceedAfterError:)])
     {
+      /* wl 20250114: For a very long time, this method incorrectly was
+       * using NSFilePathErrorKey instead of the documented key @"Path"
+       * to report the affected path. For backward compatibility we keep
+       * setting the wrong key below.
+       */
       NSDictionary *errorInfo = [NSDictionary dictionaryWithObjectsAndKeys:
                                                 path, NSFilePathErrorKey,
+                                              path, @"Path",
                                               error, @"Error", nil];
       return [handler fileManager: self
 	  shouldProceedAfterError: errorInfo];
@@ -3581,8 +3692,14 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
   if ([handler respondsToSelector:
     @selector (fileManager:shouldProceedAfterError:)])
     {
+      /* wl 20250114: For a very long time, this method incorrectly was
+       * using NSFilePathErrorKey instead of the documented key @"Path"
+       * to report the affected path. For backward compatibility we keep
+       * setting the wrong key below.
+       */
       NSDictionary *errorInfo = [NSDictionary dictionaryWithObjectsAndKeys:
                                                 path, NSFilePathErrorKey,
+                                              path, @"Path",
                                               fromPath, @"FromPath",
                                               toPath, @"ToPath",
                                               error, @"Error", nil];
@@ -3592,80 +3709,109 @@ static inline void gsedRelease(GSEnumeratedDirectory X)
   return NO;
 }
 
-- (NSString*) _lastError
+- (NSError*) _lastError
 {
 #if __has_feature(objc_arc)
-  return (__bridge NSString*)GS_THREAD_KEY_GET(thread_last_error_key);
+  return (__bridge NSError*)GS_THREAD_KEY_GET(thread_last_error_key);
 #else
-  return (NSString*)GS_THREAD_KEY_GET(thread_last_error_key);
+  return (NSError*)GS_THREAD_KEY_GET(thread_last_error_key);
 #endif
 }
 
-- (void) _setLastError: (NSString*)error
+- (NSString*) _lastErrorText
 {
+  return [[[self _lastError] userInfo] objectForKey: NSLocalizedDescriptionKey];
+}
+
+- (void) _setLastError: (NSString*)msg code: (int)aCode
+{
+  NSError	*oldError;
+  NSError	*error;
+
+  if (msg)
+    {
+      error = [NSError _error: aCode description: msg];
+    }
+  else
+    {
+      error = nil;
+    }
 #if __has_feature(objc_arc)
-  NSString *oldError = (__bridge_transfer NSString*)GS_THREAD_KEY_GET(thread_last_error_key);
+  oldError = (__bridge_transfer NSError*)GS_THREAD_KEY_GET(thread_last_error_key);
   GS_THREAD_KEY_SET(thread_last_error_key, (__bridge_retained void*)error);
 #pragma unused(oldError)
 #else
-  NSString *oldError = (NSString*)GS_THREAD_KEY_GET(thread_last_error_key);
+  oldError = (NSError*)GS_THREAD_KEY_GET(thread_last_error_key);
   GS_THREAD_KEY_SET(thread_last_error_key, RETAIN(error));
   RELEASE(oldError);
 #endif
 }
 
+- (void) _setLastError: (NSString*)msg
+{
+  [self _setLastError: msg code: 0];
+}
+
 - (NSError*) _errorFrom: (NSString *)fromPath to: (NSString *)toPath
 {
-  NSError       *error;
-  NSDictionary  *errorInfo;
-  NSString      *message;
-  NSString      *domain;
-  NSInteger     code;
-  NSString      *lastError = [self _lastError];
+  NSError       *error = [self _lastError];
 
-  if (lastError)
+  if (error)
     {
-      message = lastError;
-      domain = NSCocoaErrorDomain;
-      code = 0;
+      NSMutableDictionary	*m;
+
+      /* The last error was created using a private method which produces
+       * an error instance with a mutable dictionary as its userInfo so we
+       * can efficiently use that error to return additional information.
+       */
+      error = AUTORELEASE(RETAIN(error));
+      [self _setLastError: nil];
+      m = (NSMutableDictionary*)[error userInfo];
+      if (fromPath && toPath)
+	{
+	  [m setObject: fromPath forKey: @"FromPath"];
+	  [m setObject: toPath forKey: @"ToPath"];
+	}
+      else if (fromPath)
+	{
+	  [m setObject: fromPath forKey: NSFilePathErrorKey];
+	}
     }
   else
     {
+      NSDictionary  *errorInfo;
+      NSString      *message;
+      NSString      *domain;
+      NSInteger     code;
+
       error = [NSError _last];
       message = [error localizedDescription];
       domain = [error domain];
       code = [error code];
-    }
-
-  if (fromPath && toPath)
-    {
-      errorInfo = [NSDictionary dictionaryWithObjectsAndKeys:
-        fromPath, @"FromPath",
-        toPath, @"ToPath",
-        message, NSLocalizedDescriptionKey,
-        nil];
-    }
-  else if (fromPath)
-    {
-      errorInfo = [NSDictionary dictionaryWithObjectsAndKeys:
-        fromPath, NSFilePathErrorKey,
-        message, NSLocalizedDescriptionKey,
-        nil];      
-    }
-  else
-    {
-      errorInfo = [NSDictionary dictionaryWithObjectsAndKeys:
-        message, NSLocalizedDescriptionKey,
-        nil];      
-    }
-
-  error = [NSError errorWithDomain: domain
-                              code: code
-                          userInfo: errorInfo];
-
-  if (lastError)
-    {
-      [self _setLastError: nil];
+      if (fromPath && toPath)
+	{
+	  errorInfo = [NSDictionary dictionaryWithObjectsAndKeys:
+	    fromPath, @"FromPath",
+	    toPath, @"ToPath",
+	    message, NSLocalizedDescriptionKey,
+	    nil];
+	}
+      else if (fromPath)
+	{
+	  errorInfo = [NSDictionary dictionaryWithObjectsAndKeys:
+	    fromPath, NSFilePathErrorKey,
+	    message, NSLocalizedDescriptionKey,
+	    nil];      
+	}
+      else
+	{
+	  errorInfo = [NSDictionary dictionaryWithObjectsAndKeys:
+	    message, NSLocalizedDescriptionKey,
+	    nil];      
+	}
+      error = [NSError errorWithDomain: domain
+				  code: code
+			      userInfo: errorInfo];
     }
 
   return error;
@@ -3926,14 +4072,14 @@ static NSSet	*fileKeys = nil;
 #if defined(HAVE_GETGRGID)
   struct group	*gp;
 
-  [gnustep_global_lock lock];
+  GS_MUTEX_LOCK(classLock);
   gp = getgrgid(statbuf.st_gid);
   if (gp != 0)
     {
       group = [NSString stringWithCString: gp->gr_name
 				 encoding: defaultEncoding];
     }
-  [gnustep_global_lock unlock];
+  GS_MUTEX_UNLOCK(classLock);
 #endif
 #endif
 #endif
@@ -4093,14 +4239,14 @@ static NSSet	*fileKeys = nil;
 #if     defined(HAVE_GETPWUID)
   struct passwd *pw;
 
-  [gnustep_global_lock lock];
+  GS_MUTEX_LOCK(classLock);
   pw = getpwuid(statbuf.st_uid);
   if (pw != 0)
     {
       owner = [NSString stringWithCString: pw->pw_name
 				 encoding: defaultEncoding];
     }
-  [gnustep_global_lock unlock];
+  GS_MUTEX_UNLOCK(classLock);
 #endif
 #endif
 #endif /* HAVE_PWD_H */

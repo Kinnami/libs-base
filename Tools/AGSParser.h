@@ -18,7 +18,7 @@
    You should have received a copy of the GNU General Public
    License along with this program; see the file COPYINGv3.
    If not, write to the Free Software Foundation,
-   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+   31 Milk Street #960789 Boston, MA 02196 USA.
 
    <abstract>
     This is the AGSParser class ... and some autogsdoc examples.
@@ -38,6 +38,8 @@
 @class	NSMutableArray;
 @class	NSMutableDictionary;
 @class	NSString;
+
+@class	AGSValidator;
 
 @interface	AGSParser : NSObject
 {
@@ -74,6 +76,7 @@
   NSMutableArray	*ifStack;	/** Track preprocessor conditionals. */
 
   NSString		*comment;	/** Documentation accumulator. */
+  unsigned              commentEndPos;  /** Cursor at last accumulation. */
   NSMutableDictionary	*info;		/** All information parsed. */
   NSMutableDictionary   *orderedSymbolDeclsByUnit;
   NSMutableArray	*source;	/** Names of source files. */
@@ -81,12 +84,15 @@
   NSCharacterSet	*identStart;	/** Legit initial char of identifier */
   NSCharacterSet	*spaces;	/** All blank characters */
   NSCharacterSet	*spacenl;	/** Blanks excluding newline */
+
+  AGSValidator		*validator;	/** Validates comment content */
 }
 
 - (BOOL) debug;
+- (NSString*) fileName;
 - (NSMutableDictionary*) info;
 - (NSDictionary *) orderedSymbolDeclarationsByUnit;
-- (id) init;	/** <init> Simple initialiser */
+- (id) init;	/** <init /> Simple initialiser */
 - (NSMutableArray*) outputs;
 - (unsigned) parseComment;
 - (NSMutableArray*) parseDeclarations;
@@ -104,6 +110,7 @@
 - (NSMutableArray*) parseProtocolList;
 - (unsigned) parseSpace: (NSCharacterSet*)spaceSet;
 - (unsigned) parseSpace;
+- (unsigned) parseSpaceOrGeneric;
 - (NSString*) parseVersion;
 - (void) reset;
 - (void) setDebug: (BOOL)aFlag;
@@ -115,9 +122,11 @@
 - (void) setWordMap: (NSDictionary*)map;
 - (void) setupBuffer;
 - (unsigned) skipArray;
+- (unsigned) skipAttribute: (NSString*)s;
 - (unsigned) skipBlock;
 - (unsigned) skipBlock: (BOOL*)isEmpty;
 - (unsigned) skipGeneric;
+- (unsigned) skipIfAttribute;
 - (unsigned) skipLiteral;
 - (unsigned) skipRemainderOfLine;
 - (unsigned) skipSpaces;

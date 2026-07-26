@@ -18,14 +18,12 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */
 
 #import "common.h"
 #define	EXPOSE_NSPort_IVARS	1
 #define	EXPOSE_NSMessagePort_IVARS	1
-#import "GNUstepBase/GSLock.h"
 #import "Foundation/NSArray.h"
 #import "Foundation/NSAutoreleasePool.h"
 #import "Foundation/NSNotification.h"
@@ -56,10 +54,10 @@
 #include <arpa/inet.h>		/* for inet_ntoa() */
 #include <ctype.h>		/* for strchr() */
 
-#if	defined(HAVE_SYS_FCNTL_H)
-#  include	<sys/fcntl.h>
-#elif	defined(HAVE_FCNTL_H)
+#if	defined(HAVE_FCNTL_H)
 #  include	<fcntl.h>
+#elif	defined(HAVE_SYS_FCNTL_H)
+#  include	<sys/fcntl.h>
 #endif
 
 #include <sys/time.h>
@@ -1701,19 +1699,12 @@ typedef	struct {
 - (oneway void) release
 {
   M_LOCK(messagePortLock);
-  if (NSDecrementExtraRefCountWasZero(self))
+  if (_internal != 0 && 1 == [self retainCount])
     {
-      if (_internal != 0)
-        {
-          NSMapRemove(messagePortMap, (void*)name);
-	}
-      M_UNLOCK(messagePortLock);
-      [self dealloc];
+      NSMapRemove(messagePortMap, (void*)name);
     }
-  else
-    {
-      M_UNLOCK(messagePortLock);
-    }
+  M_UNLOCK(messagePortLock);
+  [super release];
 }
 
 - (void) removeHandle: (GSMessageHandle*)handle

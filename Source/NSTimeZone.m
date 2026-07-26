@@ -21,8 +21,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    <title>NSTimeZone class reference</title>
    $Date$ $Revision$
@@ -34,6 +33,8 @@
    Time zone names can be different from system to system, but usually
    the user has already set up his timezone independant of GNUstep, so we
    should respect that information.
+   For testing purposes, the GNUSTEP_BUILTIN_TZ environment variable can
+   be set to force the system independent data to be used.
 
    We do not use a dictionary for storing time zones, since such a
    dictionary would be VERY large (~500K).  And we would have to use a
@@ -86,7 +87,6 @@
 
 #import "common.h"
 #define	EXPOSE_NSTimeZone_IVARS	1
-#import "GNUstepBase/GSLock.h"
 #include <stdio.h>
 #include <time.h>
 #import "Foundation/NSArray.h"
@@ -106,6 +106,7 @@
 #import "Foundation/NSTimeZone.h"
 #import "Foundation/NSByteOrder.h"
 #import "Foundation/NSLocale.h"
+#import "Foundation/NSScanner.h"
 #import "GNUstepBase/NSString+GNUstepBase.h"
 #import "GSPrivate.h"
 #import "GSPThread.h"
@@ -190,12 +191,12 @@ _NSToICUTZDisplayStyle(NSTimeZoneNameStyle style)
 static inline UCalendar *
 ICUCalendarSetup (NSTimeZone *tz, NSLocale *locale)
 {
-  NSString *tzStr;
-  int32_t tzLen;
-  const char *cLocale;
-  UChar tzName[BUFFER_SIZE];
-  UCalendar *cal;
-  UErrorCode err = U_ZERO_ERROR;
+  NSString	*tzStr;
+  int32_t	tzLen;
+  const char	*cLocale;
+  UChar 	tzName[BUFFER_SIZE];
+  UCalendar	*cal;
+  UErrorCode	err = U_ZERO_ERROR;
   
   tzStr = [tz name];
   if ((tzLen = [tzStr length]) > BUFFER_SIZE)
@@ -226,6 +227,7 @@ static NSString *tzdir = nil;
 static GSPlaceholderTimeZone	*defaultPlaceholderTimeZone;
 static NSMapTable		*placeholderMap;
 static GSAbsTimeZone            *commonAbsolutes[145] = { 0 };
+static NSMapTable		*absolutes = 0;
 
 /*
  * Temporary structure for holding time zone details.
@@ -288,6 +290,9 @@ static NSMutableDictionary *abbreviationDictionary = nil;
 /* one-to-many abbreviation to time zone name dictionary. */
 static NSMutableDictionary *abbreviationMap = nil;
 
+static NSArray *namesArray = nil;
+static NSArray *regionsArray = nil;
+
 /* Lock for creating time zones. */
 static gs_mutex_t zone_mutex;
 
@@ -314,7 +319,6 @@ static NSString *_time_zone_path(NSString *subpath, NSString *type)
 {
 @public
   NSString	*name;
-  id		detail;
   int		offset; // Offset from UTC in seconds.
 }
 
@@ -380,6 +384,9 @@ static NSString *_time_zone_path(NSString *subpath, NSString *type)
     {
       zone = RETAIN(localTimeZone);
       DESTROY(self);
+      /* The following strance cast, where we should be returning (id),
+       * is to work around a bug/feature in at least one version of clang.
+       */
       return (GSPlaceholderTimeZone*)zone;
     }
 
@@ -506,7 +513,10 @@ static NSString *_time_zone_path(NSString *subpath, NSString *type)
                 {
                   zone = [[GSWindowsTimeZone alloc] initWithName: name data: 0];
                   DESTROY(self);
-                  return zone;
+		  /* The following strance cast, where we should be returning (id),
+		   * is to work around a bug/feature in at least one version of clang.
+		   */
+                  return (GSPlaceholderTimeZone*)zone;
                 }
 #else
 		{
@@ -523,6 +533,9 @@ static NSString *_time_zone_path(NSString *subpath, NSString *type)
 	}
     }
   DESTROY(self);
+  /* The following strance cast, where we should be returning (id),
+   * is to work around a bug/feature in at least one version of clang.
+   */
   return (GSPlaceholderTimeZone*)zone;
 }
 
@@ -636,17 +649,6 @@ static NSString *_time_zone_path(NSString *subpath, NSString *type)
 @implementation GSAbsTimeZone
 
 static int		uninitialisedOffset = 100000;
-static NSMapTable	*absolutes = 0;
-
-+ (void) initialize
-{
-  if (self == [GSAbsTimeZone class])
-    {
-      absolutes = NSCreateMapTable(NSIntegerMapKeyCallBacks,
-	NSNonOwnedPointerMapValueCallBacks, 0);
-      [[NSObject leakAt: (id*)&absolutes] release];
-    }
-}
 
 - (NSString*) abbreviationForDate: (NSDate*)aDate
 {
@@ -662,7 +664,6 @@ static NSMapTable	*absolutes = 0;
       GS_MUTEX_UNLOCK(zone_mutex);
     }
   RELEASE(name);
-  RELEASE(detail);
   DEALLOC;
 }
 
@@ -704,66 +705,67 @@ static NSMapTable	*absolutes = 0;
     }
   anOffset *= sign;
 
+  GS_MUTEX_LOCK(zone_mutex);
   if (anOffset % 900 == 0)
     {
       z = commonAbsolutes[anOffset/900 + 72];
-      if (z != nil)
-        {
-          IF_NO_ARC(RETAIN(z);)
-          DESTROY(self);
-          return z;
-        }
-    }
-
-  GS_MUTEX_LOCK(zone_mutex);
-  z = (GSAbsTimeZone*)NSMapGet(absolutes, (void*)(uintptr_t)anOffset);
-  if (z != nil)
-    {
-      IF_NO_ARC(RETAIN(z);)
-      DESTROY(self);
     }
   else
     {
-      if (aName == nil)
-	{
-	  if (anOffset % 60 == 0)
-	    {
-	      char	s = (anOffset >= 0) ? '+' : '-';
-	      unsigned	i = (anOffset >= 0) ? anOffset / 60 : -anOffset / 60;
-	      unsigned	h = (i / 60) % 24;
-	      unsigned	m = i % 60;
-	      char	buf[9];
+      z = (GSAbsTimeZone*)NSMapGet(absolutes, (void*)(uintptr_t)anOffset);
+    }
+  if (z)
+    {
+      IF_NO_ARC(RETAIN(z);)
+      DESTROY(self);
+      GS_MUTEX_UNLOCK(zone_mutex);
+      return z;
+    }
 
-	      snprintf(buf, sizeof(buf), "GMT%c%02u%02u", s, h, m);
-	      name = [[NSString alloc] initWithUTF8String: buf];
-	    }
-	  else
-	    {
-	      /*
-	       * Should never happen now we round to the minute
-	       * for MacOS-X compatibnility.
-	       */
-	      name = [[NSString alloc]
-		initWithFormat: @"NSAbsoluteTimeZone:%"PRIdPTR, anOffset];
-	    }
+  if (nil == (self = [super init]))
+    {
+      return self;
+    }
+
+  if (aName == nil)
+    {
+      if (anOffset % 60 == 0)
+	{
+	  char	s = (anOffset >= 0) ? '+' : '-';
+	  unsigned	i = (anOffset >= 0) ? anOffset / 60 : -anOffset / 60;
+	  unsigned	h = (i / 60) % 24;
+	  unsigned	m = i % 60;
+	  char	buf[9];
+
+	  snprintf(buf, sizeof(buf), "GMT%c%02u%02u", s, h, m);
+	  name = [[NSString alloc] initWithUTF8String: buf];
 	}
       else
 	{
-	  name = [aName copy];
+	  /*
+	   * Should never happen now we round to the minute
+	   * for MacOS-X compatibnility.
+	   */
+	  name = [[NSString alloc]
+	    initWithFormat: @"NSAbsoluteTimeZone:%"PRIdPTR, anOffset];
 	}
-      detail = [[GSAbsTimeZoneDetail alloc] initWithTimeZone: self];
-      offset = anOffset;
-      z = self;
-      NSMapInsert(absolutes, (void*)(uintptr_t)anOffset, (void*)z);
-      [zoneDictionary setObject: self forKey: (NSString*)name];
     }
+  else
+    {
+      name = [aName copy];
+    }
+  z = self;
+  offset = anOffset;
+  NSMapInsert(absolutes, (void*)(uintptr_t)anOffset, (void*)z);
+  [zoneDictionary setObject: z forKey: name];
+
   if (anOffset % 900 == 0)
     {
       int       index = anOffset/900 + 72;
 
       if (nil == commonAbsolutes[index])
         {
-          commonAbsolutes[index] = RETAIN(self);
+          commonAbsolutes[index] = RETAIN(z);
         }
     }
   GS_MUTEX_UNLOCK(zone_mutex);
@@ -787,12 +789,12 @@ static NSMapTable	*absolutes = 0;
 
 - (NSArray*) timeZoneDetailArray
 {
-  return [NSArray arrayWithObject: detail];
+  return [NSArray arrayWithObject: [self timeZoneDetailForDate: nil]];
 }
 
 - (NSTimeZoneDetail*) timeZoneDetailForDate: (NSDate*)date
 {
-  return detail;
+  return AUTORELEASE([[GSAbsTimeZoneDetail alloc] initWithTimeZone: self]);
 }
 
 - (NSString*) timeZoneName
@@ -938,15 +940,15 @@ static NSMapTable	*absolutes = 0;
 
 /**
  * <p>
- * The local time zone is obtained from, in order of preference:<br/ >
- *  1) the user defaults database: NSGlobalDomain "Local Time Zone"<br/ >
- *  2) the GNUSTEP_TZ environment variable<br/ >
- *  3) the file "localtime" in System/Library/Libraries/Resources/NSTimeZone<br/ >
- *  4) the TZ environment variable<br/ >
- *  5) The system zone settings (typically in /etc/localtime)<br/ >
- *  6) tzset and tznam on platforms which have it<br/ >
- *  7) Windows registry, on Win32 systems<br/ >
- *  8) or the fallback time zone (which is UTC)<br/ >
+ * The local time zone is obtained from, in order of preference:<br />
+ *  1) the user defaults database: NSGlobalDomain "Local Time Zone"<br />
+ *  2) the GNUSTEP_TZ environment variable<br />
+ *  3) the file "localtime" in System/Library/Libraries/Resources/NSTimeZone<br />
+ *  4) the TZ environment variable<br />
+ *  5) The system zone settings (typically in /etc/localtime)<br />
+ *  6) tzset and tznam on platforms which have it<br />
+ *  7) Windows registry, on Win32 systems<br />
+ *  8) or the fallback time zone (which is UTC)<br />
  * </p>
  * <p>If the GNUstep time zone datafiles become too out of date, one
  * can download an updated database from <uref
@@ -993,7 +995,7 @@ static NSMapTable	*absolutes = 0;
       NSAutoreleasePool	*pool = [NSAutoreleasePool new];
       NSString		*path;
 
-      path = _time_zone_path (ABBREV_DICT, @"plist");
+      path = _time_zone_path(ABBREV_DICT, @"plist");
       if (path != nil)
 	{
 	  /*
@@ -1197,8 +1199,6 @@ static NSMapTable	*absolutes = 0;
  */
 + (NSArray*) knownTimeZoneNames
 {
-  static NSArray *namesArray = nil;
-
   /* We create the array only when we need it to reduce overhead. */
   if (namesArray != nil)
     {
@@ -1206,7 +1206,7 @@ static NSMapTable	*absolutes = 0;
     }
 
   GS_MUTEX_LOCK(zone_mutex);
-  if (namesArray == nil)
+  if (namesArray == nil && NO == [NSObject isExiting])
     {
       unsigned		i;
       NSMutableArray	*ma;
@@ -1282,6 +1282,42 @@ static NSMapTable	*absolutes = 0;
     }
 }
 
++ (void) atExit
+{
+  id	o;
+
+  /* Deallocate all the placeholders in the map before destroying it.
+   */
+  GS_MUTEX_LOCK(zone_mutex);
+  if (placeholderMap)
+    {
+      NSMapEnumerator   mEnum = NSEnumerateMapTable(placeholderMap);
+      Class             c;
+      id                o;
+
+      while (NSNextMapEnumeratorPair(&mEnum, (void *)&c, (void *)&o))
+        {
+          NSDeallocateObject(o);
+        }
+      NSEndMapTableEnumeration(&mEnum);
+      DESTROY(placeholderMap);
+    }
+  GS_MUTEX_UNLOCK(zone_mutex);
+
+  DESTROY(zoneDictionary);
+  DESTROY(defaultTimeZone);
+  DESTROY(systemTimeZone);
+  DESTROY(abbreviationDictionary);
+  DESTROY(abbreviationMap);
+  DESTROY(absolutes);
+  DESTROY(namesArray);
+  DESTROY(regionsArray);
+
+  o = defaultPlaceholderTimeZone;
+  defaultPlaceholderTimeZone = nil;
+  NSDeallocateObject(o);
+}
+
 /**
  * Return the default time zone for this process.
  */
@@ -1304,37 +1340,40 @@ static NSMapTable	*absolutes = 0;
 
 + (void) initialize
 {
-  if (self == [NSTimeZone class])
+  static BOOL	beenHere = NO;
+
+  if (NO == beenHere && self == [NSTimeZone class])
     {
+      beenHere = YES;
       NSTimeZoneClass = self;
       GS_MUTEX_INIT_RECURSIVE(zone_mutex);
       GSPlaceholderTimeZoneClass = [GSPlaceholderTimeZone class];
       zoneDictionary = [[NSMutableDictionary alloc] init];
-      [[NSObject leakAt: &zoneDictionary] release];
 
-      /*
-       * Set up infrastructure for placeholder timezones.
+      /* Set up infrastructure for placeholder timezones.
        */
       defaultPlaceholderTimeZone = (GSPlaceholderTimeZone*)
 	NSAllocateObject(GSPlaceholderTimeZoneClass, 0, NSDefaultMallocZone());
-      [[NSObject leakAt: &defaultPlaceholderTimeZone] release];
       placeholderMap = NSCreateMapTable(NSNonOwnedPointerMapKeyCallBacks,
 	NSNonRetainedObjectMapValueCallBacks, 0);
-      [[NSObject leakAt: (id*)&placeholderMap] release];
 
+      /* Hash table lookup for absolute time zones.
+       */
+      absolutes = NSCreateMapTable(NSIntegerMapKeyCallBacks,
+	NSNonOwnedPointerMapValueCallBacks, 0);
+
+      /* NB. the instance of NSLocalTimeZone overrides memory management
+       * so it is never deallocated.  This must not be destroyed in the
+       * +atExit: method becuse that would confuse leak analysis tools.
+       */
       localTimeZone = [[NSLocalTimeZone alloc] init];
-      [[NSObject leakAt: (id*)&localTimeZone] release];
-
-      [[NSObject leakAt: (id*)&defaultTimeZone] release];
-      [[NSObject leakAt: (id*)&systemTimeZone] release];
-      [[NSObject leakAt: (id*)&abbreviationDictionary] release];
-      [[NSObject leakAt: (id*)&abbreviationMap] release];
-      [[NSObject leakAt: (id*)&absolutes] release];
 
       [[NSNotificationCenter defaultCenter] addObserver: self
         selector: @selector(_notified:)
         name: NSUserDefaultsDidChangeNotification
         object: nil];
+
+      [self registerAtExit];
     }
 }
 
@@ -1438,7 +1477,7 @@ static NSMapTable	*absolutes = 0;
        * Try to get timezone from windows system call.
        */
       {
-        TIME_ZONE_INFORMATION tz;
+        DYNAMIC_TIME_ZONE_INFORMATION tz;
         DWORD dst;
         wchar_t *tzName;
 
@@ -1446,17 +1485,16 @@ static NSMapTable	*absolutes = 0;
         // Get time zone name for US locale as expected by ICU method below
         LANGID origLangID = GetThreadUILanguage();
         SetThreadUILanguage(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
-        dst = GetTimeZoneInformation(&tz);
+        dst = GetDynamicTimeZoneInformation(&tz);
         SetThreadUILanguage(origLangID);
 
-        // Only tz.StandardName time zone conversions are supported, as
-        // the Zone-Tzid table lacks all daylight time conversions:
+        // The Zone-Tzid table lacks all daylight time conversions:
         // e.g. 'W. Europe Daylight Time' <-> 'Europe/Berlin' is not listed.
         //
         // See: https://unicode-org.github.io/cldr-staging/charts/latest/supplemental/zone_tzid.html
-        tzName = tz.StandardName;
+        tzName = tz.TimeZoneKeyName;
 #else
-        dst = GetTimeZoneInformation(&tz);
+        dst = GetDynamicTimeZoneInformation(&tz);
 
         if (dst == TIME_ZONE_ID_DAYLIGHT)
           tzName = tz.DaylightName;
@@ -1464,7 +1502,7 @@ static NSMapTable	*absolutes = 0;
           tzName = tz.StandardName;
 #endif
 
-        localZoneSource = @"function: 'GetTimeZoneInformation()'";
+        localZoneSource = @"function: 'GetDynamicTimeZoneInformation()'";
 
 #if defined(_MSC_VER) && defined(UCAL_H)
         // Convert Windows timezone name to IANA identifier
@@ -1563,7 +1601,7 @@ static NSMapTable	*absolutes = 0;
 	     is a symlink to the time zone. Getting the actual data (which
 	     is easier) doesn't help, since we won't know the name itself.  */
 #if defined(HAVE_TZHEAD) && defined(TZDEFAULT)
-	  tzdir = RETAIN([NSString stringWithUTF8String: TZDIR]);
+	  ASSIGN(tzdir, [NSString stringWithUTF8String: TZDIR]);
 	  localZoneString = [NSString stringWithUTF8String: TZDEFAULT];
           localZoneSource = [NSString stringWithFormat:
 	    @"file (TZDEFAULT): '%@'", localZoneString];
@@ -1577,6 +1615,7 @@ static NSMapTable	*absolutes = 0;
 	      localZoneString
 		= [localZoneString stringByResolvingSymlinksInPath];
 	      /* Guess what tzdir is */
+	      DESTROY(tzdir);
 	      tzdir = [localZoneString stringByDeletingLastPathComponent];
 	      while ([tzdir length] > 2
 		&& [dflt fileExistsAtPath:
@@ -1645,7 +1684,8 @@ static NSMapTable	*absolutes = 0;
       if (localZoneString != nil)
 	{
 	  NSDebugLLog (@"NSTimeZone", @"Using zone %@", localZoneString);
-	  zone = [defaultPlaceholderTimeZone initWithName: localZoneString];
+	  zone = AUTORELEASE([defaultPlaceholderTimeZone
+	    initWithName: localZoneString]);
 	  if (zone == nil)
 	    {
 	      NSArray	*possibleZoneNames;
@@ -1681,7 +1721,7 @@ static NSMapTable	*absolutes = 0;
 			&& [dflt contentsEqualAtPath: fileName 
 					     andPath: SYSTEM_TIME_FILE])
 			{
-			  zone = [[self timeZoneWithName: zoneName] retain];
+			  zone = [self timeZoneWithName: zoneName];
 
 			  if (zone != nil)
 			    {
@@ -1729,7 +1769,7 @@ zoneName, LOCALDBKEY, LOCALDBKEY, zoneName);
 @"See '%@'\n"
 @"for the standard timezones such as 'GB-Eire' or 'America/Chicago'.\n",
 LOCALDBKEY, LOCALDBKEY, _time_zone_path (ZONES_DIR, nil));
-	      zone = [[self timeZoneWithAbbreviation: localZoneString] retain];
+	      zone = [self timeZoneWithAbbreviation: localZoneString];
 	      if (zone != nil)
 		{
 		  NSInteger	s;
@@ -1763,7 +1803,7 @@ localZoneString, [zone name], sign, s/3600, (s/60)%60);
       if (zone == nil)
         {
           NSLog(@"Using time zone with absolute offset 0.");
-          zone = systemTimeZone;
+          zone = [self timeZoneForSecondsFromGMT: 0];
         }
       ASSIGN(systemTimeZone, zone);
     }
@@ -1780,63 +1820,68 @@ localZoneString, [zone name], sign, s/3600, (s/60)%60);
  */
 + (NSArray*) timeZoneArray
 {
-  static NSArray *regionsArray = nil;
-
   /* We create the array only when we need it to reduce overhead. */
   if (regionsArray != nil)
     {
       return regionsArray;
     }
   GS_MUTEX_LOCK(zone_mutex);
-  if (regionsArray == nil)
+  if (regionsArray == nil && NO == [NSObject isExiting])
     {
-      NSAutoreleasePool	*pool = [NSAutoreleasePool new];
-      int		index;
-      int		i;
-      char		name[80];
-      FILE		*fp;
+      NSAutoreleasePool *pool = [NSAutoreleasePool new];
       NSMutableArray	*temp_array[24];
+      NSInteger		 index;
+      NSInteger		 i;
+      NSString		*name;
       NSString		*path;
+      NSString		*contents;
+      NSScanner		*scanner;
+      NSCharacterSet	*newLineSet;
+      NSError		*error = nil;
 
       for (i = 0; i < 24; i++)
 	{
 	  temp_array[i] = [NSMutableArray array];
 	}
 
-      path = _time_zone_path (REGIONS_FILE, nil);
+      path = _time_zone_path(REGIONS_FILE, nil);
       if (path != nil)
 	{
-#if	defined(_WIN32)
-	  unichar	mode[3];
-
-	  mode[0] = 'r';
-	  mode[1] = 'b';
-	  mode[2] = '\0';
-
-	  fp = _wfopen((const unichar*)[path fileSystemRepresentation], mode);
-#else
-	  fp = fopen([path fileSystemRepresentation], "r");
-#endif
-	  if (fp == NULL)
+	  contents = [NSString stringWithContentsOfFile: path
+					       encoding: NSUTF8StringEncoding
+						  error: &error];
+	  if (!contents)
 	    {
-              GS_MUTEX_UNLOCK(zone_mutex);
-	      [NSException
-		raise: NSInternalInconsistencyException
-		format: @"Failed to open time zone regions array file."];
+	      NSException  *exp;
+	      NSDictionary *userInfo;
+	      GS_MUTEX_UNLOCK(zone_mutex);
+
+	      userInfo = [NSDictionary
+		dictionaryWithObjectsAndKeys: error, @"underlyingError"];
+	      exp = [NSException
+		exceptionWithName: NSInternalInconsistencyException
+			   reason:
+			     @"Failed to open time zone regions array file."
+			 userInfo: userInfo];
+	      [exp raise];
 	    }
-	  while (fscanf(fp, "%d %79s", &index, name) == 2)
+	  newLineSet = [NSCharacterSet newlineCharacterSet];
+	  scanner = [NSScanner scannerWithString: contents];
+
+	  while ([scanner scanInteger: &index]
+	    && [scanner scanUpToCharactersFromSet: newLineSet
+				       intoString: &name])
 	    {
-              if (index < 0)
-                index = 0;
-              else
-                index %= 24;
-	      [temp_array[index]
-		addObject: [NSString stringWithUTF8String: name]];
+	      if (index < 0)
+		index = 0;
+	      else
+		index %= 24;
+
+	      [temp_array[index] addObject: name];
 	    }
-	  fclose(fp);
 	}
       else
-	{
+        {
 	  NSString	*zonedir = [NSTimeZone _getTimeZoneFile: @"WET"]; 
 
 	  if (tzdir != nil)
@@ -2089,7 +2134,11 @@ localZoneString, [zone name], sign, s/3600, (s/60)%60);
 
 - (id) init
 {
-  return [self initWithName: @"NSLocalTimeZone" data: nil];
+  if ([self class] == NSTimeZoneClass)
+    {
+      return [self initWithName: @"NSLocalTimeZone" data: nil];
+    }
+  return [super init];
 }
 
 - (id) initWithCoder: (NSCoder*)aDecoder
@@ -2352,21 +2401,21 @@ localZoneString, [zone name], sign, s/3600, (s/60)%60);
   UCalendar *cal;
   UErrorCode err = U_ZERO_ERROR;
   
-  cal = ICUCalendarSetup (self, locale);
+  cal = ICUCalendarSetup(self, locale);
   if (cal == NULL)
     return nil;
   
   cLocale = [[locale localeIdentifier] UTF8String];
-  result = NSZoneMalloc ([self zone], BUFFER_SIZE * sizeof(UChar));
-  len = ucal_getTimeZoneDisplayName (cal, _NSToICUTZDisplayStyle(style),
+  result = NSZoneMalloc([self zone], BUFFER_SIZE * sizeof(UChar));
+  len = ucal_getTimeZoneDisplayName(cal, _NSToICUTZDisplayStyle(style),
     cLocale, result, BUFFER_SIZE, &err);
   if (len > BUFFER_SIZE)
     {
-      result = NSZoneRealloc ([self zone], result, len * sizeof(UChar));
-      ucal_getTimeZoneDisplayName (cal, _NSToICUTZDisplayStyle(style),
+      result = NSZoneRealloc([self zone], result, len * sizeof(UChar));
+      ucal_getTimeZoneDisplayName(cal, _NSToICUTZDisplayStyle(style),
         cLocale, result, len, &err);
     }
-  
+  ucal_close(cal);
   return AUTORELEASE([[NSString alloc] initWithCharactersNoCopy: result
     length: len freeWhenDone: YES]);
 #else
@@ -2427,6 +2476,7 @@ localZoneString, [zone name], sign, s/3600, (s/60)%60);
  * Common locations for timezone info on unix systems.
  */
 static NSString *zoneDirs[] = {
+  nil,		// Populate from TZDIR environment variable
 #ifdef TZDIR
   @TZDIR,
 #endif
@@ -2456,15 +2506,22 @@ static NSString *zoneDirs[] = {
 	  NSString	*zonedir = nil;
 	  unsigned	i;
 
+	  if (nil == zoneDirs[0])
+	    {
+	      zoneDirs[0] = RETAIN([[[NSProcessInfo processInfo] environment]
+		objectForKey: @"TZDIR"]);
+	    }
 	  for (i = 0; i < sizeof(zoneDirs)/sizeof(zoneDirs[0]); i++)
 	    {
 	      BOOL	isDir;
 
 	      zonedir
 		= [zoneDirs[i] stringByAppendingPathComponent: POSIX_TZONES];
-	      if ([mgr fileExistsAtPath: zonedir isDirectory: &isDir] && isDir)
+	      if (zonedir
+		&& [mgr fileExistsAtPath: zonedir isDirectory: &isDir]
+		&& isDir)
 		{
-		  tzdir = RETAIN(zonedir);
+		  ASSIGN(tzdir, zonedir);
 		  break;  // use first one
 		}
 	    }
@@ -2472,17 +2529,23 @@ static NSString *zoneDirs[] = {
 	}
       GS_MUTEX_UNLOCK(zone_mutex);
     }
-  /* Use the system zone info if possible, otherwise, use our installed
-     info.  */
-  if (tzdir && [[NSFileManager defaultManager] fileExistsAtPath:
-    [tzdir stringByAppendingPathComponent: name] isDirectory: &isDir] == YES
-    && isDir == NO)
+
+  if (NO == [[[[NSProcessInfo processInfo] environment]
+    objectForKey: @"GNUSTEP_BUILTIN_TZ"] boolValue])
     {
-      dir = tzdir;
+      /* Use the system zone info if possible, otherwise, use our installed
+       * info.
+       */
+      if (tzdir && [[NSFileManager defaultManager] fileExistsAtPath:
+	[tzdir stringByAppendingPathComponent: name] isDirectory: &isDir]
+	&& isDir == NO)
+	{
+	  dir = tzdir;
+	}
     }
   if (dir == nil)
     {
-      dir = _time_zone_path (ZONES_DIR, nil);
+      dir = _time_zone_path(ZONES_DIR, nil);
     }
   return [dir stringByAppendingPathComponent: name];
 }
@@ -3023,10 +3086,25 @@ getTypeInfo(NSTimeInterval since, GSTimeZone *zone)
   union local_storage	*lsp;
   const char      	*zoneName;
 
+  if (nil == (self = [super init]))
+    {
+      return self;
+    }
+
   /* The placeholder class should have dealt with loading the data
    */
-  NSAssert([data isKindOfClass: [NSData class]], NSInvalidArgumentException);
-  NSAssert([name isKindOfClass: [NSString class]], NSInvalidArgumentException);
+  if (NO == [data isKindOfClass: [NSData class]])
+    {
+      RELEASE(self);
+      [NSException raise: NSInvalidArgumentException
+		  format: @"Bad/missing time zone data"];
+    }
+  if (NO == [name isKindOfClass: [NSString class]])
+    {
+      RELEASE(self);
+      [NSException raise: NSInvalidArgumentException
+		  format: @"Bad/missing time zone name"];
+    }
 
   timeZoneName = [name copy];
   timeZoneData = [data copy];
@@ -3037,7 +3115,7 @@ getTypeInfo(NSTimeInterval since, GSTimeZone *zone)
 
   NS_DURING
     {
-      size_t		nread;
+      size_t			nread;
       union input_buffer  	*up;
 
       lsp = malloc(sizeof(*lsp));

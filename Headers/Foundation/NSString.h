@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
   */
 
 /**
@@ -426,6 +425,49 @@ enum {
 typedef NSUInteger NSStringEncodingConversionOptions;
 #endif
 
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_6,GS_API_LATEST) 
+/** For enumerateSubstringsInRange:options:usingBlock: 
+    You must include an substring type (`NSStringEnumerationBy`), and may
+    bitwise or (`|`) with any of the other options. */
+enum {
+    /* Must include one of these 
+       Must fit into 8 bits. */
+    /** Enumerate by lines. Uses lineRangeForRange: */
+    NSStringEnumerationByLines = 0,
+    /** Enumerate by paragraph. Uses paragraphRangeForRange: */
+    NSStringEnumerationByParagraphs = 1,
+    /** Enumerate by composed character sequence. Uses rangeOfComposedCharacterSequencesForRange: */
+    NSStringEnumerationByComposedCharacterSequences = 2,
+    /** Enumerate by word, as specified in Unicode TR 29. 
+        Only supported if GNUstep is compiled with ICU. 
+        Uses UBRK_WORD, with current locale and standard abbreviation lists if 
+        NSStringEnumerationLocalized is passed, otherwise the locale is "en_US_POSIX". */
+    NSStringEnumerationByWords = 3,
+    /** Enumerate by sentence, as specified in Unicode TR 29. 
+        Only supported if GNUstep is compiled with ICU. 
+        Uses UBRK_WORD, with current locale and standard abbreviation lists if 
+        NSStringEnumerationLocalized is passed, otherwise the locale is "en_US_POSIX". */
+    NSStringEnumerationBySentences = 4,
+    #if OS_API_VERSION(MAC_OS_X_VERSION_11,GS_API_LATEST) 
+    /** Undocumented public API on macOS. Not supported by GNUstep. */
+    NSStringEnumerationByCaretPositions = 5,
+    /** Undocumented public API on macOS. Not supported by GNUstep. */
+    NSStringEnumerationByDeletionClusters = 6,
+    #endif
+
+    /* May pass one of these via bitwise or. 
+       Must be a single bit set at an offset >= 8. */
+    NSStringEnumerationReverse = 1UL << 8,
+    NSStringEnumerationSubstringNotRequired = 1UL << 9,
+    NSStringEnumerationLocalized = 1UL << 10
+};
+
+typedef NSUInteger NSStringEnumerationOptions;
+
+DEFINE_BLOCK_TYPE(GSNSStringEnumerationBlock, void, NSString* substring, NSRange substringRange, NSRange enclosingRange, BOOL* stop);
+DEFINE_BLOCK_TYPE(GSNSStringLineEnumerationBlock, void, NSString *line, BOOL *stop);
+#endif
+
 /**
  * <p>
  *   <code>NSString</code> objects represent an immutable string of Unicode 3.0
@@ -472,7 +514,7 @@ typedef NSUInteger NSStringEncodingConversionOptions;
  */
 
 GS_EXPORT_CLASS
-@interface NSString :NSObject <NSCoding, NSCopying, NSMutableCopying>
+@interface NSString :NSObject <NSCoding, NSSecureCoding, NSCopying, NSMutableCopying>
 
 + (instancetype) string;
 + (instancetype) stringWithCharacters: (const unichar*)chars
@@ -485,7 +527,7 @@ GS_EXPORT_CLASS
                             length: (NSUInteger)length;
 + (instancetype) stringWithCString: (const char*)byteString;
 + (instancetype) stringWithFormat: (NSString*)format, ... NS_FORMAT_FUNCTION(1,2);
-+ (instancetype) stringWithContentsOfFile:(NSString *)path;
++ (instancetype) stringWithContentsOfFile: (NSString *)path;
 
 // Initializing Newly Allocated Strings
 - (instancetype) init;
@@ -613,6 +655,14 @@ GS_EXPORT_CLASS
 /** Returns a copy of the receiver normalised using the C form.
  */
 - (NSString *) precomposedStringWithCanonicalMapping;
+#endif
+
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_5,GS_API_LATEST)
+/** Returns a copy of the receiver suitable for comparison with the supplied
+ * options and locale.
+ */
+- (NSString *) stringByFoldingWithOptions: (NSStringCompareOptions)options
+				    locale: (NSLocale *)locale;
 #endif
 
 // Converting String Contents into a Property List
@@ -977,6 +1027,7 @@ GS_EXPORT_CLASS
 			 range: (NSRange)compareRange 
 			locale: (id)locale;
 - (NSComparisonResult) localizedCompare: (NSString *)string;
+- (NSComparisonResult) localizedStandardCompare: (NSString *)string;
 - (NSComparisonResult) localizedCaseInsensitiveCompare: (NSString *)string;
 - (BOOL) writeToFile: (NSString*)filename
 	  atomically: (BOOL)useAuxiliaryFile;
@@ -1049,6 +1100,15 @@ GS_EXPORT_CLASS
 #if OS_API_VERSION(GS_API_NONE, GS_API_NONE)
 + (Class) constantStringClass;
 #endif	/* GS_API_NONE */
+
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_6,GS_API_LATEST) 
+
+- (void) enumerateLinesUsingBlock: (GSNSStringLineEnumerationBlock)block;
+
+- (void) enumerateSubstringsInRange: (NSRange)range 
+                            options: (NSStringEnumerationOptions)opts 
+                         usingBlock: (GSNSStringEnumerationBlock)block;
+#endif
 
 @end
 

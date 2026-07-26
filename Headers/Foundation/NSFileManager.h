@@ -21,8 +21,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
 
 <chapter>
@@ -357,6 +356,21 @@ GS_EXPORT_CLASS
                      error: (NSError **)error;
 
 /**
+ * Returns an array of search paths to look at for resources.<br />
+ * The paths are returned in domain order:
+ * USER, LOCAL, NETWORK then SYSTEM.<br />
+ * The presence of a path in this list does <em>not</em> mean that the
+ * path actually exists in the filesystem.<br />
+ * If you are wanting to locate an existing resource, you should normally
+ * call this method with NSAllDomainsMask, but if you wish to find the
+ * path in which you should create a new file, you would generally
+ * specify a particular domain, and then create the path in the file
+ * system if it does not already exist.
+ */
+- (GS_GENERIC_CLASS(NSArray, NSURL *) *)URLsForDirectory: (NSSearchPathDirectory)directory
+                                               inDomains: (NSSearchPathDomainMask)domain;
+
+/**
  * Enumerate over the contents of a directory.
  */
 - (NSDirectoryEnumerator *)enumeratorAtURL: (NSURL *)url
@@ -575,6 +589,7 @@ GS_EXPORT_CLASS
     BOOL isFollowing: 1;
     BOOL justContents: 1;
     BOOL skipHidden: 1;
+    BOOL currentIsDir: 1;
   } _flags;
 #endif
 #if     GS_NONFRAGILE
@@ -590,6 +605,10 @@ GS_EXPORT_CLASS
 - (NSDictionary*) directoryAttributes;
 - (NSDictionary*) fileAttributes;
 - (void) skipDescendents;
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_6,GS_API_LATEST)
+- (NSUInteger) level;
+- (void) skipDescendants;
+#endif
 
 @end /* NSDirectoryEnumerator */
 

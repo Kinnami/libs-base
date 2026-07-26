@@ -23,8 +23,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02111 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    <title>The XML and HTML parsing system</title>
    <chapter>
@@ -156,6 +155,10 @@ static char * xml_strdup(const char *from)
   return to;
 }
 
+@interface	NSObject (SetupForGSXML)
++ (void) _setupForGSXML;
+@end
+
 @implementation	NSObject (SetupForGSXML)
 + (void) _setupForGSXML
 {
@@ -172,6 +175,10 @@ static char * xml_strdup(const char *from)
       usImp = (id (*)(id, SEL, const unsigned char*))
 	[NSString_class methodForSelector: usSel];
       cacheDone = YES;
+      if (NO == [NSThread isMainThread])
+	{
+	  NSLog(@"WARNING libxml2 not initialised in main thread ... XML operations performed after this thread exits may crash.");
+	}
     }
 }
 @end
@@ -183,9 +190,28 @@ setupCache()
     {
       /* Setup of libxml2 must be done on main thread.
        */
-      [NSObject performSelectorOnMainThread: @selector(_setupForGSXML)
-				 withObject: nil
-			      waitUntilDone: YES];
+      if ([NSThread isMainThread])
+	{
+	  [NSObject _setupForGSXML];
+	}
+      else
+	{
+	  NSTimeInterval	limit;
+
+	  limit = [NSDate timeIntervalSinceReferenceDate] + 5.0;
+	  [NSObject performSelectorOnMainThread: @selector(_setupForGSXML)
+				     withObject: nil
+				  waitUntilDone: NO];
+	  while (NO == cacheDone
+	    && [NSDate timeIntervalSinceReferenceDate] < limit)
+	    {
+	      [NSThread sleepForTimeInterval: 0.1];
+	    }
+	  if (NO == cacheDone)
+	    {
+	      [NSObject _setupForGSXML];
+	    }
+	}
     }
 }
 
@@ -206,12 +232,10 @@ static xmlParserInputPtr
 loadEntityFunction(const unsigned char *url, const unsigned char *eid,
   void *ctx);
 static xmlParserInputPtr
-resolveEntityFunction(void *ctx, const unsigned char *eid,
-  const unsigned char *url);
+resolveEntityFunction(void *ctx,
+  const unsigned char *eid, const unsigned char *url);
 static xmlEntityPtr
-getEntityIgnoreExternal(void *ctx, const xmlChar *name);
-static xmlEntityPtr
-getEntityResolveExternal(void *ctx, const xmlChar *name);
+getEntityDefault(void *ctx, const xmlChar *name);
 
 @interface GSXPathObject(Private)
 + (id) _newWithNativePointer: (xmlXPathObject *)lib
@@ -228,12 +252,14 @@ getEntityResolveExternal(void *ctx, const xmlChar *name);
 
 @interface GSXMLNode (GSPrivate)
 - (id) _initFrom: (void*)data parent: (id)p;
+- (void) _setOwnsLib: (BOOL)f;
 @end
 
 @interface GSXMLParser (Private)
 - (BOOL) _initLibXML;
 - (NSMutableString*) _messages;
 - (void) _parseChunk: (NSData*)data;
+- (BOOL) _resolves;
 @end
 
 @interface GSSAXHandler (Private)
@@ -501,6 +527,7 @@ static NSMapTable	*attrNames = 0;
   n = [n _initFrom:
     xmlNewDocNode(lib, [ns lib], UTF8STRING(name), UTF8STRING(content))
     parent: self];
+  [n _setOwnsLib: YES];	// Not part of document yet
   return AUTORELEASE(n);
 }
 
@@ -524,6 +551,7 @@ static NSMapTable	*attrNames = 0;
 {
   xmlNodePtr	nodeLib = (xmlNodePtr)[node lib];
   xmlNodePtr	selfLib = (xmlNodePtr)[self lib];
+  xmlNodePtr	old;
 
   if (node == nil)
     {
@@ -535,7 +563,20 @@ static NSMapTable	*attrNames = 0;
       [NSException raise: NSInvalidArgumentException
       		  format: @"Attempt to set root to node from other document"];
     }
-  xmlDocSetRootElement(lib, nodeLib);
+  old = xmlDocSetRootElement(lib, nodeLib);
+  [node _setOwnsLib: NO];
+  if (old)
+    {
+      /* The old root is detached from the document and can no longer be used.
+       */
+      if (old->_private != 0)
+	{
+	  GSXMLDocument	*owner = (GSXMLDocument*)old->_private;
+
+	  owner->lib = 0;
+	}
+      xmlFreeNode(old);
+    }
   return node;
 }
 
@@ -594,9 +635,13 @@ static NSMapTable	*attrNames = 0;
       DESTROY(self);
       return nil;
     }
-  lib = data;
-  _ownsLib = f;
-  ASSIGN(_parent, p);
+  if (nil != (self = [super init]))
+    {
+      lib = data;
+      _ownsLib = f;
+      ((xmlNodePtr)(lib))->_private = self;
+      ASSIGN(_parent, p);
+    }
   return self;
 }
 @end
@@ -993,6 +1038,11 @@ static NSMapTable	*nodeNames = 0;
 - (void) dealloc
 {
   RELEASE(_parent);
+  if (lib && _ownsLib)
+    {
+      xmlFreeNode(lib);
+      lib = 0;
+    }
   [super dealloc];
 }
 
@@ -1643,16 +1693,23 @@ static NSMapTable	*nodeNames = 0;
  */
 - (id) _initFrom: (void*)data parent: (id)p
 {
-  if (data == NULL)
+  if (nil != (self = [super init]))
     {
-      NSLog(@"%@ - no data for initialization",
-	NSStringFromClass([self class]));
-      DESTROY(self);
-      return nil;
+      if (data == NULL)
+	{
+	  NSLog(@"%@ - no data for initialization",
+	    NSStringFromClass([self class]));
+	  DESTROY(self);
+	  return nil;
+	}
+      lib = data;
+      ASSIGN(_parent, p);
     }
-  lib = data;
-  ASSIGN(_parent, p);
   return self;
+}
+- (void) _setOwnsLib: (BOOL)f
+{
+  _ownsLib = f;
 }
 @end
 
@@ -1917,7 +1974,7 @@ static NSString	*endMarker = @"At end of incremental parse";
 
 /**
  * If called by a SAX callback routine, this method will terminate
- * the parsiong process.
+ * the parsing process.
  */
 - (void) abortParsing
 {
@@ -1925,12 +1982,16 @@ static NSString	*endMarker = @"At end of incremental parse";
     {
       xmlParserCtxtPtr	ctxt = (xmlParserCtxtPtr)lib;
 
+#ifdef	HAVE_XMLSTOPPARSER
+      xmlStopParser(ctxt);
+#else
       // Stop SAX callbacks
       ctxt->disableSAX = 1;
       // Stop incoming data being parsed.
       ctxt->instate = XML_PARSER_EOF;
       // Pretend we are at end of file (nul byte).
       if (ctxt->input != NULL) ctxt->input->cur = (const unsigned char*)"";
+#endif
     }
 }
 
@@ -2031,25 +2092,28 @@ static NSString	*endMarker = @"At end of incremental parse";
  */
 - (id) initWithSAXHandler: (GSSAXHandler*)handler
 {
-  if (handler == nil)
+  if (nil != (self = [super init]))
     {
-      saxHandler = [GSTreeSAXHandler new];
-    }
-  else if ([handler isKindOfClass: [GSSAXHandler class]] == YES)
-    {
-      saxHandler = RETAIN(handler);
-    }
-  else
-    {
-      NSLog(@"Bad GSSAXHandler object passed to GSXMLParser initialiser");
-      DESTROY(self);
-      return nil;
-    }
-  [saxHandler _setParser: self];
-  if ([self _initLibXML] == NO)
-    {
-      DESTROY(self);
-      return nil;
+      if (handler == nil)
+	{
+	  saxHandler = [GSTreeSAXHandler new];
+	}
+      else if ([handler isKindOfClass: [GSSAXHandler class]] == YES)
+	{
+	  saxHandler = RETAIN(handler);
+	}
+      else
+	{
+	  NSLog(@"Bad GSSAXHandler object passed to GSXMLParser initialiser");
+	  DESTROY(self);
+	  return nil;
+	}
+      [saxHandler _setParser: self];
+      if ([self _initLibXML] == NO)
+	{
+	  DESTROY(self);
+	  return nil;
+	}
     }
   return self;
 }
@@ -2130,8 +2194,10 @@ static NSString	*endMarker = @"At end of incremental parse";
       DESTROY(self);
       return nil;
     }
-  src = [data copy];
-  self = [self initWithSAXHandler: handler];
+  if (nil != (self = [self initWithSAXHandler: handler]))
+    {
+      src = [data copy];
+    }
   return self;
 }
 
@@ -2377,28 +2443,9 @@ static NSString	*endMarker = @"At end of incremental parse";
 
 - (BOOL) resolveEntities: (BOOL)yesno
 {
-  BOOL	old;
+  BOOL	old = resolve;;
 
-  if (yesno) yesno = YES;
-  if ((((xmlParserCtxtPtr)lib)->sax)->getEntity
-    == (void*)getEntityIgnoreExternal)
-    {
-      old = NO;
-    }
-  else
-    {
-      old = YES;
-    }
-  if (YES == yesno)
-    {
-      (((xmlParserCtxtPtr)lib)->sax)->getEntity
-        = (void*)getEntityResolveExternal;
-    }
-  else
-    {
-      (((xmlParserCtxtPtr)lib)->sax)->getEntity
-        = (void*)getEntityIgnoreExternal;
-    } 
+  resolve = yesno;
   return old;
 }
 
@@ -2409,14 +2456,11 @@ static NSString	*endMarker = @"At end of incremental parse";
  */
 - (BOOL) substituteEntities: (BOOL)yesno
 {
-  BOOL	old;
+  xmlParserCtxtPtr	context = (xmlParserCtxtPtr)lib;
+  BOOL			old;
 
-  if (yesno) yesno = YES;
-  old = (((xmlParserCtxtPtr)lib)->replaceEntities) ? YES : NO;
-  if (old != yesno)
-    {
-      ((xmlParserCtxtPtr)lib)->replaceEntities = (yesno ? 1 : 0);
-    }
+  old = context->replaceEntities ? YES : NO;
+  context->replaceEntities = (yesno ? 1 : 0);
   
   return old;
 }
@@ -2469,16 +2513,15 @@ static NSString	*endMarker = @"At end of incremental parse";
     }
   else
     {
-      /*
-       * Put saxHandler address in _private member, so we can retrieve
+      /* Put saxHandler address in _private member, so we can retrieve
        * the GSSAXHandler to use in our SAX C Functions.
        */
       ((xmlParserCtxtPtr)lib)->_private = saxHandler;
 
-      /*
-       * Set the entity loading function for this parser to be our one.
+      /* Set the entity loading function for this parser to be our one.
        */
       ((xmlParserCtxtPtr)lib)->sax->resolveEntity = resolveEntityFunction;
+      [self resolveEntities: NO];	// Off by default
     }
   return YES;
 }
@@ -2498,6 +2541,10 @@ static NSString	*endMarker = @"At end of incremental parse";
   xmlParseChunk(lib, [data bytes], [data length], data == nil);
 }
 
+- (BOOL) _resolves
+{
+  return resolve;
+}
 @end
 
 /**
@@ -2598,11 +2645,12 @@ static NSString	*endMarker = @"At end of incremental parse";
 #define	HANDLER	((GSSAXHandler*)(((xmlParserCtxtPtr)ctx)->_private))
 
 static xmlEntityPtr
-getEntityDefault(void *ctx, const xmlChar *name, BOOL resolve)
+getEntityDefault(void *ctx, const xmlChar *name)
 {
   xmlParserCtxtPtr      ctxt = (xmlParserCtxtPtr) ctx;
   xmlEntityPtr          ret = NULL;
 
+// NSLog(@"getEntityDefault called for '%s'", name);
   if (ctx != 0)
     {
       if (0 == ctxt->inSubset)
@@ -2641,87 +2689,93 @@ getEntityDefault(void *ctx, const xmlChar *name, BOOL resolve)
       else
         {
           ret = xmlGetDocEntity(ctxt->myDoc, name);
-        }
+	}
+#if LIBXML_VERSION < 21300
+      /* In older versions we may need to parse the entity content.
+       */
       if ((ret != NULL)
         && ((ctxt->validate) || (ctxt->replaceEntities))
         && (ret->children == NULL)
         && (ret->etype == XML_EXTERNAL_GENERAL_PARSED_ENTITY))
         {
-          if (YES == resolve)
-            {
-              xmlNodePtr    children;
-              int           val;
+	  xmlNodePtr    children;
+	  int           val;
 
-              /*
-               * for validation purposes we really need to fetch and
-               * parse the external entity
-               */
-              val = xmlParseCtxtExternalEntity(ctxt, ret->URI,
-                ret->ExternalID, &children);
-              if (val == 0)
-                {
-                  xmlAddChildList((xmlNodePtr) ret, children);
-                }
-              else
-                {
-                  ((((xmlParserCtxtPtr)ctxt)->sax)->fatalError)(ctxt,
-                    "Failure to process entity %s\n", name);
-                  xmlStopParser(ctxt);
-                  ctxt->validate = 0;
-                  return NULL;
-                }
-              ret->owner = 1;
+	  /*
+	   * for validation purposes we really need to fetch and
+	   * parse the external entity
+	   */
+	  val = xmlParseCtxtExternalEntity(ctxt, ret->URI,
+	    ret->ExternalID, &children);
+	  if (val == 0)
+	    {
+	      xmlAddChildList((xmlNodePtr) ret, children);
+	    }
+	  else
+	    {
+	      ((((xmlParserCtxtPtr)ctxt)->sax)->fatalError)(ctxt,
+		"Failure to process entity %s\n", name);
+	      xmlStopParser(ctxt);
+	      ctxt->validate = 0;
+	      return NULL;
+	    }
+	  ret->owner = 1;
 #if LIBXML_VERSION < 21100
-              if (ret->checked == 0)
-                {
-                  ret->checked = 1;
-                }
-#endif
-            }
-        }
+	  /* Set old flag ... not prent/needed in cewlater versions.
+	   */
+	  if (ret->checked == 0)
+	    {
+	      ret->checked = 1;
+	    }
+#endif	/* LIBXML_VERSION < 21100 */
+	}
+#endif	/* LIBXML_VERSION < 21300 */
     }
   return ret;
-}
-
-static xmlEntityPtr
-getEntityIgnoreExternal(void *ctx, const xmlChar *name)
-{
-  return getEntityDefault(ctx, name, NO);
-}
-
-static xmlEntityPtr
-getEntityResolveExternal(void *ctx, const xmlChar *name)
-{
-  return getEntityDefault(ctx, name, YES);
 }
 
 /* WARNING ... as far as I can tell libxml2 never uses the resolveEntity
  * callback, so this function is never called via that route.
  * We therefore also set this as the global default entity loading
  * function (in [GSXMLParser+initialize] and [GSSAXHandler+initialize]).
- *
- * To implement the -resolveEntities method we must permit/deny any attempt
- * to load an entity (before the function to resolve is even called),
- * We therefore intercept the getEntity callback (using getEntityDefault()),
- * re-implementing some of the code inside libxml2 to avoid attempts to
- * load/parse external entities unless we have specifically enabled it.
  */
 static xmlParserInputPtr
 loadEntityFunction(const unsigned char *url,
   const unsigned char *eid,
   void *ctx)
 {
+  xmlParserCtxtPtr		cp = (xmlParserCtxtPtr)ctx;
+  BOOL				restricted = NO;
   NSString			*file = nil;
   NSString			*entityId;
   NSString			*location;
   NSArray			*components;
   NSMutableString		*local;
+  GSXMLParser			*parser;
   unsigned			count;
   unsigned			index;
 
   NSCAssert(ctx, @"No Context");
   if (url == NULL)
     return NULL;
+
+  parser = [HANDLER parser];
+  if (NO == [parser _resolves])
+    {
+      if (cp->inSubset && cp->validate)
+	{
+	  /* Resolving of external entities is turned off, but we are
+	   * doing validity checking and are loading a subset, so we
+	   * will need that subset to perform the validity checks.
+	   * Proceed to do loading.
+	   */
+	  restricted = YES;
+	}
+      else
+	{
+          return xmlNewStringInputStream(ctx, (const xmlChar *)"");
+	}
+    }
 
   entityId = (eid != NULL) ? (id)UTF8Str(eid) : nil;
   location = UTF8Str(url);
@@ -2903,10 +2957,15 @@ loadEntityFunction(const unsigned char *url,
   if ([file length] > 0)
     {
       NSURL *theURL = [NSURL fileURLWithPath: file];
+
       xmlCatalogAdd((const unsigned char*)"public", eid,
         UTF8STRING([theURL absoluteString]));
     }
-    
+  else if (restricted)
+    {
+      return xmlNewStringInputStream(ctx, (const xmlChar *)"");
+    }
+
   /* A local DTD will now be in the catalog: The builtin entity resolver can
    * take over.
    */
@@ -2917,6 +2976,7 @@ static xmlParserInputPtr
 resolveEntityFunction(void *ctx,
   const unsigned char *eid, const unsigned char *url)
 {
+//NSLog(@"resolveEntityFunction called for %s %s", url, eid);
   return loadEntityFunction(url, eid, ctx);
 }
 
@@ -2967,7 +3027,11 @@ hasInternalSubsetFunction(void *ctx)
   has = [HANDLER hasInternalSubset];
   if (has < 0)
     {
-      has = TREEFUN(hasInternalSubset, (ctx));
+#if LIBXML_VERSION >= 20900
+      has = xmlSAX2HasInternalSubset (ctx);
+#else
+      has = xmlInternalSubset (ctxt);
+#endif
     }
   return has;
 }
@@ -2981,7 +3045,11 @@ hasExternalSubsetFunction(void *ctx)
   has = [HANDLER hasExternalSubset];
   if (has < 0)
     {
-      has = TREEFUN(hasExternalSubset, (ctx));
+#if LIBXML_VERSION >= 20900
+      has = xmlSAX2HasExternalSubset (ctx);
+#else
+      has = xmlExternalSubset (ctx);
+#endif
     }
   return has;
 }
@@ -3695,7 +3763,8 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
       LIB->isStandalone           = (void*) isStandaloneFunction;
       LIB->hasInternalSubset      = (void*) hasInternalSubsetFunction;
       LIB->hasExternalSubset      = (void*) hasExternalSubsetFunction;
-      LIB->getEntity              = (void*) getEntityIgnoreExternal;
+      LIB->resolveEntity          = (void*) resolveEntityFunction;
+      LIB->getEntity              = (void*) getEntityDefault;
       LIB->entityDecl             = (void*) entityDeclFunction;
       LIB->notationDecl           = (void*) notationDeclFunction;
       LIB->attributeDecl          = (void*) attributeDeclFunction;
@@ -3713,7 +3782,6 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
       LIB->fatalError             = (void*) fatalErrorFunction;
       LIB->getParameterEntity     = (void*) getParameterEntityFunction;
       LIB->cdataBlock             = (void*) cdataBlockFunction;
-      LIB->resolveEntity          = (void*) resolveEntityFunction;
 #undef	LIB
       return YES;
     }
@@ -3815,10 +3883,11 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
       SETCB(isStandalone, isStandalone);
       SETCB(hasInternalSubset, hasInternalSubset);
       SETCB(hasExternalSubset, hasExternalSubset);
+      LIB->resolveEntity = resolveEntityFunction;
       SETCB(getEntity, getEntity:);
       if (LIB->getEntity != getEntityFunction)
         {
-          LIB->getEntity = getEntityIgnoreExternal;
+          LIB->getEntity = getEntityDefault;
         }
       SETCB(entityDecl, entityDecl:type:public:system:content:);
       SETCB(notationDecl, notationDecl:public:system:);
@@ -3864,7 +3933,11 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
     }
   else
     {
+#if LIBXML_VERSION <= 21100
       memcpy(lib, &htmlDefaultSAXHandler, sizeof(htmlSAXHandler));
+#else
+      xmlSAX2InitHtmlDefaultSAXHandler(lib);
+#endif
 
 #define	LIB	((htmlSAXHandlerPtr)lib)
       LIB->internalSubset         = (void*)internalSubsetFunction;
@@ -3872,6 +3945,7 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
       LIB->isStandalone           = (void*)isStandaloneFunction;
       LIB->hasInternalSubset      = (void*)hasInternalSubsetFunction;
       LIB->hasExternalSubset      = (void*)hasExternalSubsetFunction;
+      LIB->resolveEntity          = (void*)resolveEntityFunction;
       LIB->getEntity              = (void*)getEntityFunction;
       LIB->entityDecl             = (void*)entityDeclFunction;
       LIB->notationDecl           = (void*)notationDeclFunction;
@@ -3917,11 +3991,14 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
 - (id) _initWithNativePointer: (xmlXPathObject *)lib
 		      context: (GSXPathContext *)context
 {
-  _lib = lib;
-  /* We RETAIN our context because we might be holding references to nodes
-   * which belong to the document, and we must make sure the document is
-   * not freed before we are.  */
-  ASSIGN (_context, context);
+  if (nil != (self = [super init]))
+    {
+      _lib = lib;
+      /* We RETAIN our context because we might be holding references to nodes
+       * which belong to the document, and we must make sure the document is
+       * not freed before we are.  */
+      ASSIGN (_context, context);
+    }
   return self;
 }
 
@@ -4106,10 +4183,12 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
  */
 - (id) initWithDocument: (GSXMLDocument *)d
 {
-  ASSIGN (_document, d);
-  _lib = xmlXPathNewContext ([_document lib]);
-  ((xmlXPathContext*)_lib)->node = xmlDocGetRootElement ([_document lib]);
-
+  if (nil != (self = [super init]))
+    {
+      ASSIGN (_document, d);
+      _lib = xmlXPathNewContext ([_document lib]);
+      ((xmlXPathContext*)_lib)->node = xmlDocGetRootElement ([_document lib]);
+    }
   return self;
 }
 

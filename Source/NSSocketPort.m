@@ -18,14 +18,12 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */
 
 #import "common.h"
 #define	EXPOSE_NSPort_IVARS	1
 #define	EXPOSE_NSSocketPort_IVARS	1
-#import "GNUstepBase/GSLock.h"
 #import "GNUstepBase/GSTLS.h"
 #import "Foundation/NSArray.h"
 #import "Foundation/NSNotification.h"
@@ -66,10 +64,10 @@
 
 #include <ctype.h>		/* for strchr() */
 
-#if	defined(HAVE_SYS_FCNTL_H)
-#  include	<sys/fcntl.h>
-#elif	defined(HAVE_FCNTL_H)
+#if	defined(HAVE_FCNTL_H)
 #  include	<fcntl.h>
+#elif	defined(HAVE_SYS_FCNTL_H)
+#  include	<sys/fcntl.h>
 #endif
 
 #ifdef HAVE_SYS_TIME_H
@@ -1249,7 +1247,8 @@ static Class	runLoopClass;
                * first thing to do is send out port information (after setting
                * up a TLS session if necessary).
                */
-	      ASSIGN(cData, newDataWithEncodedPort(p));
+	      RELEASE(cData);
+	      cData = newDataWithEncodedPort(p);
 	      cLength = 0;
 
 #if	defined(HAVE_GNUTLS)
@@ -2466,7 +2465,7 @@ static Class		tcpPortClass;
 - (oneway void) release
 {
   M_LOCK(tcpPortLock);
-  if (NSDecrementExtraRefCountWasZero(self))
+  if (1 == [self retainCount])
     {
       NSMapTable	*thePorts;
 
@@ -2475,13 +2474,9 @@ static Class		tcpPortClass;
 	{
 	  NSMapRemove(thePorts, host);
 	}
-      M_UNLOCK(tcpPortLock);
-      [self dealloc];
     }
-  else
-    {
-      M_UNLOCK(tcpPortLock);
-    }
+  M_UNLOCK(tcpPortLock);
+  [super release];
 }
 
 
@@ -2733,10 +2728,25 @@ static Class		tcpPortClass;
 }
 
 /** Sets the TLS options for network connections created by this port
- * acting as a network client.
+ * acting as a network client.<br />
+ * If options is nil, TLS is not used for the network connections.<br />
+ * When options in not nil, if GSTLSVerify is missing a value of NO is set
+ * so that connections to server with self-signed certificates will work
+ * by default.  To require the server to have a trusted certificate
+ * the options must contain GSTLSVerify set to YES.
  */
 - (void) setClientOptionsForTLS: (NSDictionary*)options
 {
+  if (options)
+    {
+      NSMutableDictionary	*m = AUTORELEASE([options mutableCopy]);
+
+      if (nil == [options objectForKey: GSTLSVerify])
+	{
+          [m setObject: @"NO" forKey: GSTLSVerify];
+	}
+      options = m;
+    }
   M_LOCK(myLock);
   ASSIGNCOPY(tlscopts, options);
   M_UNLOCK(myLock);

@@ -20,8 +20,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    <title>NSMethodSignature class reference</title>
    $Date$ $Revision$
@@ -39,7 +38,28 @@
 #import "Foundation/NSException.h"
 #import "Foundation/NSCoder.h"
 
+
+static inline unsigned int
+gs_string_hash(const char *s)
+{
+  unsigned int val = 0;
+  while (*s != 0)
+    {
+      val = (val << 5) + val + *s++;
+    }
+  return val;
+}
+
+#define	GSI_MAP_RETAIN_KEY(M, X)
+#define	GSI_MAP_RELEASE_KEY(M, X)	free(X.ptr)
+#define GSI_MAP_HASH(M, X)    (gs_string_hash(X.ptr))
+#define GSI_MAP_EQUAL(M, X,Y) (strcmp(X.ptr, Y.ptr) == 0)
+#define GSI_MAP_KTYPES	GSUNION_PTR
+#define GSI_MAP_VTYPES	GSUNION_OBJ
+#import "GNUstepBase/GSIMap.h"
+
 #import "GSInvocation.h"
+#import "GSPThread.h"
 
 #ifdef HAVE_MALLOC_H
 #if !defined(__OpenBSD__)
@@ -242,17 +262,27 @@ next_arg(const char *typePtr, NSArgumentInfo *info, char *outTypes)
 
       case _C_STRUCT_B:
 	{
-	  unsigned int acc_size = 0;
-	  unsigned int def_align = objc_alignof_type(typePtr-1);
-	  unsigned int acc_align = def_align;
+	  unsigned int	acc_size = 0;
+	  unsigned int	def_align = objc_alignof_type(typePtr-1);
+	  unsigned int	acc_align = def_align;
 	  const char	*ptr = typePtr;
+	  BOOL		hasBitField = NO;
 
 	  /*
 	   *	Skip "<name>=" stuff.
 	   */
-	  while (*ptr != _C_STRUCT_E && *ptr != '=') ptr++;
-	  if (*ptr == '=') typePtr = ptr;
-	  typePtr++;
+	  while (*ptr != _C_STRUCT_E)
+	    {
+	      if (*ptr == '\0')
+		{
+		  return 0;		/* error	*/
+		}
+	      if (*ptr++ == '=')
+		{
+		  typePtr = ptr;
+		  break;
+		}
+	    }
 
 	  /*
 	   *	Base structure alignment on first element.
@@ -267,6 +297,9 @@ next_arg(const char *typePtr, NSArgumentInfo *info, char *outTypes)
 	      acc_size = ROUND(acc_size, local.align);
 	      acc_size += local.size;
 	      acc_align = MAX(local.align, def_align);
+#if	defined(_C_BFLD)
+	      if (*local.type == _C_BFLD) hasBitField = YES;
+#endif
 	    }
 	  /*
 	   *	Continue accumulating structure size
@@ -282,6 +315,9 @@ next_arg(const char *typePtr, NSArgumentInfo *info, char *outTypes)
 	      acc_size = ROUND(acc_size, local.align);
 	      acc_size += local.size;
 	      acc_align = MAX(local.align, acc_align);
+#if	defined(_C_BFLD)
+	      if (*local.type == _C_BFLD) hasBitField = YES;
+#endif
 	    }
 	  /*
 	   * Size must be a multiple of alignment
@@ -292,6 +328,13 @@ next_arg(const char *typePtr, NSArgumentInfo *info, char *outTypes)
 	    }
 	  info->size = acc_size;
 	  info->align = acc_align;
+	  /* Bit-fields share a storage unit, so their individual byte sizes
+	   * cannot be summed; take the whole structure's size from the runtime.
+	   */
+	  if (hasBitField)
+	    {
+	      info->size = objc_sizeof_type(info->type);
+	    }
 	  typePtr++;	/* Skip end-of-struct	*/
 	}
 	break;
@@ -300,14 +343,20 @@ next_arg(const char *typePtr, NSArgumentInfo *info, char *outTypes)
 	{
 	  unsigned int	max_size = 0;
 	  unsigned int	max_align = 0;
+	  const char	*ptr = typePtr;
 
 	  /*
 	   *	Skip "<name>=" stuff.
 	   */
-	  while (*typePtr != _C_UNION_E)
+	  while (*ptr != _C_UNION_E)
 	    {
-	      if (*typePtr++ == '=')
+	      if (*ptr == '\0')
 		{
+		  return 0;		/* error	*/
+		}
+	      if (*ptr++ == '=')
+		{
+		  typePtr = ptr;
 		  break;
 		}
 	    }
@@ -340,12 +389,33 @@ next_arg(const char *typePtr, NSArgumentInfo *info, char *outTypes)
 #endif
 #if     defined(_C_BFLD)
       case _C_BFLD:
-        /* Rely on the runtime to either provide the info or bomb out.
-         * Nowadays we ought to be able to expect modern enough runtimes.
+        /* The gnu runtime encodes a bit-field as b<pos><type><width> and its
+         * objc_alignof_type() aborts on that encoding, so work the alignment
+         * out directly from the field's underlying type.  A bit-field shares
+         * a storage unit with its neighbours and so contributes no separate
+         * byte size of its own; the enclosing structure takes its size from
+         * the runtime once (see the _C_BFLD handling under _C_STRUCT_B).
          */
         typePtr--;
-        info->size = objc_sizeof_type(typePtr);
-        info->align = objc_alignof_type(typePtr);
+        {
+          const char	*p = typePtr + 1;
+
+          while (isdigit(*p)) p++;	/* skip the starting bit position */
+          switch (*p)
+            {
+              case _C_CHR: case _C_UCHR:
+                info->align = __alignof__(char); break;
+              case _C_SHT: case _C_USHT:
+                info->align = __alignof__(short); break;
+              case _C_LNG: case _C_ULNG:
+                info->align = __alignof__(long); break;
+              case _C_LNG_LNG: case _C_ULNG_LNG:
+                info->align = __alignof__(long long); break;
+              default:
+                info->align = __alignof__(int); break;
+            }
+        }
+        info->size = 0;
         typePtr = objc_skip_typespec(typePtr);
         break;
 #endif
@@ -507,6 +577,16 @@ next_arg(const char *typePtr, NSArgumentInfo *info, char *outTypes)
  * the types string.
  */
       blen = (strlen(t) + 1) * 16;	// Total buffer length
+      /* No compiler-emitted type encoding approaches this size, so
+       * reject an excessively long one outright rather than allocating
+       * an arbitrary amount of stack for it.
+       */
+      if (blen > 4096)
+	{
+	  RELEASE(self);
+	  [NSException raise: NSInvalidArgumentException
+		      format: @"Method signature type encoding is too long"];
+	}
       ret = alloca(blen);
       end = ret + blen;
 
@@ -556,7 +636,53 @@ next_arg(const char *typePtr, NSArgumentInfo *info, char *outTypes)
 
 + (NSMethodSignature*) signatureWithObjCTypes: (const char*)t
 {
-  return AUTORELEASE([[[self class] alloc] _initWithObjCTypes: t]);
+  GSIMapNode node;
+  NSMethodSignature	*sig;
+
+  static GSIMapTable_t cacheTable = {};
+  static gs_mutex_t cacheTableLock = GS_MUTEX_INIT_STATIC;
+
+  GS_MUTEX_LOCK(cacheTableLock);
+  NS_DURING
+    {
+      if (cacheTable.zone == 0)
+	{
+	  GSIMapInitWithZoneAndCapacity(&cacheTable, [self zone], 8);
+	}
+
+      node = GSIMapNodeForKey(&cacheTable, (GSIMapKey)t);
+      if (node == 0)
+	{
+	  char	*buf;
+	  int	len = strlen(t) + 1;
+
+	  sig = [[self alloc] _initWithObjCTypes: t];
+	  buf = malloc(len);
+	  memcpy(buf, t, len);
+
+	  /* We suppress the static analyser warning about the
+	   * intentional leak (until end of execution) of the cache
+	   * contents.
+	   */
+#ifdef  __clang_analyzer__
+	  [[clang::suppress]]
+#endif
+	  GSIMapAddPair(&cacheTable, (GSIMapKey)buf, (GSIMapVal)(id)sig);
+	}
+      else
+	{
+	  sig = RETAIN(node->value.obj);
+	}
+    }
+  NS_HANDLER
+    {
+      GS_MUTEX_UNLOCK(cacheTableLock);
+      [localException raise];
+    }
+  NS_ENDHANDLER
+  GS_MUTEX_UNLOCK(cacheTableLock);
+
+  return AUTORELEASE(sig);
 }
 
 - (NSArgumentInfo) argumentInfoAtIndex: (NSUInteger)index

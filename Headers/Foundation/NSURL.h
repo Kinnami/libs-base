@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 */
 
 #ifndef __NSURL_h_GNUSTEP_BASE_INCLUDE
@@ -706,10 +705,23 @@ GS_NSURLComponents_IVARS;
 }
   // Creating URL components...
 + (instancetype) componentsWithString: (NSString *)URLString;
+
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_14, GS_API_LATEST)
++ (instancetype) componentsWithString: (NSString*)URLString
+            encodingInvalidCharacters: (BOOL)encodingInvalidCharacters;
+#endif
+
 + (instancetype) componentsWithURL: (NSURL *)url 
            resolvingAgainstBaseURL: (BOOL)resolve;
+
 - (instancetype) init;
+
 - (instancetype) initWithString: (NSString *)URLString;
+
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_14, GS_API_LATEST)
+- (instancetype) initWithString: (NSString*)URLString
+      encodingInvalidCharacters: (BOOL)encodingInvalidCharacters;
+#endif
 
 - (instancetype) initWithURL: (NSURL *)url 
      resolvingAgainstBaseURL: (BOOL)resolve;
