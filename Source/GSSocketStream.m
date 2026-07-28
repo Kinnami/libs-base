@@ -3264,6 +3264,7 @@ setNonBlocking(SOCKET fd)
 {
   if ((self = [super init]) != nil)
     {
+	  NSDebugMLLog (@"NSStream", @"INFORMATION: Using address '%@', port 0x%4.4hX, %hu IN %@", addr, (unsigned short) port, (unsigned short) port, self);	/* CJEC, 27-Jul-26: Log the actual address information being used. It may have been converted backwards and forwards from IP address to hostname to IP address incorrectly. Use --GNU-Debug=NSStream to log */
       if ([self _setSocketAddress: addr port: port family: AF_INET] == NO)
         {
           DESTROY(self);
