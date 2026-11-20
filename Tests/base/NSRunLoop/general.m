@@ -19,7 +19,7 @@ static unsigned counter = 0;
 
 int main()
 {
-  NSAutoreleasePool     *arp = [NSAutoreleasePool new];
+  ENTER_POOL
   NSString              *customMode = @"CustomRunLoopMode";
   MyClass               *dummy = AUTORELEASE([MyClass new]);
   NSMethodSignature     *sig;
@@ -42,59 +42,59 @@ int main()
                                         repeats: NO];
 
   run = [NSRunLoop currentRunLoop];
-  PASS(run != nil, "NSRunLoop understands [+currentRunLoop]");
-  PASS([run currentMode] == nil, "-currentMode returns nil");
+  PASS(run != nil, "NSRunLoop understands [+currentRunLoop]")
+  PASS([run currentMode] == nil, "-currentMode returns nil")
 
   ti = [NSDate timeIntervalSinceReferenceDate]; 
   PASS_RUNS(date = [NSDate dateWithTimeIntervalSinceNow: 1.0];
     [run runUntilDate: date];,
     "-runUntilDate: works");
   ti = [NSDate timeIntervalSinceReferenceDate] - ti;
-  PASS(ti >= 1.0 && ti < 1.5, "-runUntilDate: takes the correct time");
+  PASS(ti >= 1.0 && ti < 1.5, "-runUntilDate: takes the correct time")
 
   ti = [NSDate timeIntervalSinceReferenceDate]; 
   PASS_RUNS([run runUntilDate: [NSDate distantPast]];,
     "-runUntilDate: works for distant past");
   ti = [NSDate timeIntervalSinceReferenceDate] - ti;
-  PASS(ti < 0.2, "-runUntilDate: takes very short time");
+  PASS(ti < 0.2, "-runUntilDate: takes very short time")
 
   ti = [NSDate timeIntervalSinceReferenceDate]; 
   PASS_RUNS([run runUntilDate: nil];,
     "-runUntilDate: works for nil date");
   ti = [NSDate timeIntervalSinceReferenceDate] - ti;
-  PASS(ti < 0.2, "-runUntilDate: for nil date takes very short time");
+  PASS(ti < 0.2, "-runUntilDate: for nil date takes very short time")
 
   ti = [NSDate timeIntervalSinceReferenceDate]; 
   PASS_RUNS([run runMode: NSDefaultRunLoopMode beforeDate: nil];,
     "-runMode:beforeDate: works for nil date");
   ti = [NSDate timeIntervalSinceReferenceDate] - ti;
-  PASS(ti < 0.2, "-runMode:beforentilDate: for nil date takes very short time");
+  PASS(ti < 0.2, "-runMode:beforentilDate: for nil date takes very short time")
 
   tim = [NSTimer scheduledTimerWithTimeInterval: 0.005
                                      invocation: inv
                                         repeats: NO];
   [NSThread sleepForTimeInterval: 0.01];
   [run runUntilDate: [NSDate distantPast]];
-  PASS(1 == counter, "-runUntilDate: for distant past fires timer");
+  PASS(1 == counter, "-runUntilDate: for distant past fires timer")
 
   [dly invalidate];
 
-  /* We run in a custom mode to ensure there are no other timers or
-   * input sources.
-   */
-  tim = [NSTimer timerWithTimeInterval: 2.0
+  tim = [NSTimer timerWithTimeInterval: 1.0
                             invocation: inv
                                repeats: NO];
   [run addTimer: tim forMode: customMode];
+  /* Loop repeatedly in case some system event causes the loop to return.
+   */
   ti = [NSDate timeIntervalSinceReferenceDate]; 
-  PASS_RUNS(date = [NSDate dateWithTimeIntervalSinceNow: 5.0];
+  PASS_RUNS(date = [NSDate dateWithTimeIntervalSinceNow: 2.0];
+    while (1 == counter && [date timeIntervalSinceNow] > 0.0)
     [run acceptInputForMode: customMode beforeDate: date];,
      "-acceptInputForMode:beforeDate: works with a timer");
   ti = [NSDate timeIntervalSinceReferenceDate] - ti;
-  PASS(ti >= 2.0 && ti < 2.5,
-    "-acceptInputForMode:beforeDate: takes the correct time");
-  PASS(2 == counter, "-acceptInputForMode:beforeDate: fires timer");
+  PASS(ti >= 0.5 && ti < 1.5,
+    "-acceptInputForMode:beforeDate: should be 1 sec (was %f)", ti)
+  PASS(2 == counter, "-acceptInputForMode:beforeDate: fires timer")
 
-  [arp release]; arp = nil;
+  LEAVE_POOL
   return 0;
 }

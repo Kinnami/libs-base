@@ -7,7 +7,7 @@
 
 int main()
 {
-  NSAutoreleasePool   *arp = [NSAutoreleasePool new];
+  ENTER_POOL
   NSArray *result;
 
 NSLog(@"Developer: %@", NSSearchPathForDirectoriesInDomains(NSDeveloperDirectory, NSAllDomainsMask, YES));
@@ -81,6 +81,18 @@ NSLog(@"Developer: %@", NSSearchPathForDirectoriesInDomains(NSDeveloperDirectory
   
   PASS([[@"/home/nicola." stringByAppendingPathExtension: @"jpg"] isEqual: @"/home/nicola..jpg"],
        "'/home/nicola.' stringByAppendingPathExtension:'jpg' == '/home/nicola..jpg'");
+
+  PASS([[@"/home/nicola/" stringByAppendingPathExtension: @"jpg"] isEqual: @"/home/nicola.jpg"],
+       "'/home/nicola/' stringByAppendingPathExtension:'jpg' == '/home/nicola.jpg'");
+
+  PASS([[@"/home/nicola." stringByAppendingPathExtension: @""] isEqual: @"/home/nicola."],
+       "'/home/nicola.' stringByAppendingPathExtension:'' == '/home/nicola.'");
+
+  PASS([[@"/home/nicola/" stringByAppendingPathExtension: @""] isEqual: @"/home/nicola/"],
+       "'/home/nicola/' stringByAppendingPathExtension:'' == '/home/nicola/'");
+
+  PASS([[@"/home/nicola" stringByAppendingPathExtension: @""] isEqual: @"/home/nicola"],
+       "'/home/nicola' stringByAppendingPathExtension:'' == '/home/nicola'");
   
   /* in the guile version of this test the description was different than the 
      test i've updated it for the description to be the same as the test not
@@ -390,6 +402,6 @@ NSLog(@"Developer: %@", NSSearchPathForDirectoriesInDomains(NSDeveloperDirectory
     "file in child directory")
 #endif
 
-  [arp release]; arp = nil;
+  LEAVE_POOL
   return 0;
 }

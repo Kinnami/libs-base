@@ -34,6 +34,7 @@ extern "C" {
 
 @class	NSDictionary;
 @class	NSMutableDictionary;
+@class	NSSet;
 @class	NSString;
 
 #if OS_API_VERSION(GS_API_NONE, GS_API_NONE)
@@ -83,14 +84,23 @@ GSSetUserName(NSString *aName);
 GS_EXPORT NSMutableDictionary*
 GNUstepConfig(NSDictionary *newConfig);
 
-/**
- * Returns the location of the defaults database for the specified user.
+/** Returns the location of the defaults database for the specified user.
  * This uses the same information you get from GNUstepConfig() and
  * GNUstepUserConfig() and builds the path to the defaults database
- * fromm it.
+ * from it.
  */
 GS_EXPORT NSString*
 GSDefaultsRootForUser(NSString *userName);
+
+/** Returns the set of user directories which are defined in the GNUstep
+ * configuration file or by XDG.  These directory names are localized on
+ * disk and should not be localized a second time when presented in user
+ * interactions.<br />
+ * This uses the same information you get from GNUstepConfig() and
+ * GNUstepUserConfig(), with the addition of XDG user-dirs information.
+ */
+GS_EXPORT NSSet *
+GSLocalizedUserDirs();
 
 /**
  * The config dictionary passed to this function should be a
@@ -180,7 +190,8 @@ enum
   GSFontsDirectory,			/** font storage */
   GSFrameworksDirectory, 		/** frameworks */
   GSWebApplicationsDirectory,		/** web applications (GSWeb or SOPE) */
-  GSAdminToolsDirectory	        	/** admin non-gui programs */
+  GSAdminToolsDirectory,	       	/** admin non-gui programs */
+  GSResourcesDirectory			/** resource bundles not in apps */
 };
 /**
  * Enumeration of possible requested directory type specifiers for
@@ -211,8 +222,9 @@ enum
   GSToolsDirectory,
   GSAdminToolsDirectory,
   GSFontsDirectory,
+  GSWebApplicationsDirectory,
   GSFrameworksDirectory,
-  GSWebApplicationsDirectory
+  GSResourcesDirectory
 }
  </example>
  */

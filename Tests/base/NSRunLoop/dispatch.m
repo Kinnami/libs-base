@@ -8,7 +8,7 @@
 
 const NSTimeInterval kDelay = 0.01;
 
-#if GS_USE_LIBDISPATCH_RUNLOOP && __has_feature(blocks)
+#if GS_USE_LIBDISPATCH_RUNLOOP
 #  define DISPATCH_RL_INTEGRATION 1
 #  if __has_include(<dispatch.h>)
 #    include <dispatch.h>
@@ -52,32 +52,38 @@ const NSTimeInterval kDelay = 0.01;
 }
 @end
 
+static void
+incrementer(void *ctxt)
+{
+  Counter	*c = (Counter*)ctxt;
+  [c increment];
+}
+
 @implementation Queuer
 
 - (void)worker: (Counter*)counter
 {
+  ENTER_POOL
   NSUInteger i = 0;
-  NSAutoreleasePool     *pool = [NSAutoreleasePool new];
+
   for (i  = 0; i < 5; i++)
-  {
+    {
 #   ifdef DISPATCH_RL_INTEGRATION
-      dispatch_async(dispatch_get_main_queue(), ^ {
-        [counter increment];
-      });
+	dispatch_async_f(dispatch_get_main_queue(), counter, incrementer);
 #   endif
-    NSDate *d  = [NSDate dateWithTimeIntervalSinceNow: kDelay];
-    while ([d timeIntervalSinceNow] > 0)
-      {
-        [[NSRunLoop currentRunLoop] runUntilDate: d];
-      }
-  }
-  [pool release];
+      NSDate *d  = [NSDate dateWithTimeIntervalSinceNow: kDelay];
+      while ([d timeIntervalSinceNow] > 0)
+	{
+	  [[NSRunLoop currentRunLoop] runUntilDate: d];
+	}
+    }
+  LEAVE_POOL
 }
 
 
 - (void)timeout: (NSTimer*)t
 {
-  PASS(NO, "Timeout while trying to run blocks on main thread");
+  PASS(NO, "Timeout while trying to run libdispatch on main thread")
 }
 
 - (void) run
@@ -103,21 +109,19 @@ const NSTimeInterval kDelay = 0.01;
           break;
         }
     }
-  PASS([c counter] == 5, "Dispatch blocks execute on main queue");
+  PASS([c counter] == 5, "Dispatch functions execute on main queue")
 }
 
 @end
 
 int main(int argc, char *argv[])
 {
-  NSAutoreleasePool *pool = [NSAutoreleasePool new];
   START_SET("NSRunLoop libdispatch integration")
 # ifndef DISPATCH_RL_INTEGRATION
-  SKIP("No libdispatch, no blocks support or no runloop integration hooks in libdispatch")
+  SKIP("No libdispatch, or no runloop integration hooks in libdispatch")
 # else
-  [[[Queuer new] autorelease] run];
+  [AUTORELEASE([Queuer new]) run];
 # endif
   END_SET("NSRunLoop libdispatch integration")
-  [pool release];
   return 0;
 }

@@ -614,13 +614,19 @@ static SEL	remSel;
                            options: (NSEnumerationOptions)opts
                         usingBlock: (GSEnumeratorBlock)aBlock
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [[self objectsAtIndexes: indexSet] enumerateObjectsWithOptions: opts
 						      usingBlock: aBlock];
+#pragma GCC diagnostic pop
 }
 
 - (void) enumerateObjectsUsingBlock: (GSEnumeratorBlock)aBlock
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [self enumerateObjectsWithOptions: 0 usingBlock: aBlock];
+#pragma GCC diagnostic pop
 }
 
 - (void) enumerateObjectsWithOptions: (NSEnumerationOptions)opts
@@ -814,15 +820,21 @@ static SEL	remSel;
                               options: (NSEnumerationOptions)opts
                           passingTest: (GSPredicateBlock)predicate
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [[self array]
            indexOfObjectAtIndexes: indexSet
                           options: opts
                       passingTest: predicate];
+#pragma GCC diagnostic pop
 }
 
 - (NSUInteger) indexOfObjectPassingTest: (GSPredicateBlock)predicate
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self indexOfObjectWithOptions: 0 passingTest: predicate];
+#pragma GCC diagnostic pop
 }
 
 - (NSUInteger) indexOfObjectWithOptions: (NSEnumerationOptions)opts
@@ -892,15 +904,21 @@ static SEL	remSel;
 				   options: (NSEnumerationOptions)opts
 			       passingTest: (GSPredicateBlock)predicate
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [[self array]
            indexesOfObjectsAtIndexes: indexSet
                              options: opts
                          passingTest: predicate];
+#pragma GCC diagnostic pop
 }
 
 - (NSIndexSet *) indexesOfObjectsPassingTest: (GSPredicateBlock)predicate
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self indexesOfObjectsWithOptions: 0 passingTest: predicate];
+#pragma GCC diagnostic pop
 }
 
 - (NSIndexSet *) indexesOfObjectsWithOptions: (NSEnumerationOptions)opts
@@ -1205,16 +1223,22 @@ static SEL	remSel;
 
 - (NSArray *) sortedArrayUsingComparator: (NSComparator)comparator
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self sortedArrayWithOptions: 0
 		      usingComparator: comparator];
+#pragma GCC diagnostic pop
 }
 
 - (NSArray *)
     sortedArrayWithOptions: (NSSortOptions)options
            usingComparator: (NSComparator)comparator
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [[self array] sortedArrayWithOptions: options
 			      usingComparator: comparator];
+#pragma GCC diagnostic pop
 }
 
 // Filtering Ordered Sets
@@ -1371,14 +1395,49 @@ static SEL	remSel;
 
 - (void) insertObjects: (NSArray *)array atIndexes: (NSIndexSet *)indexes
 {
-  NSUInteger	index = [indexes firstIndex];
-  NSEnumerator	*enumerator = [array objectEnumerator];
-  id		object = [enumerator nextObject];
+  NSUInteger	count = [array count];
+  NSUInteger	index;
+  NSUInteger	previous = 0;
+  NSUInteger	position = 0;
+  NSUInteger	i = 0;
 
-  while (object != nil && index != NSNotFound)
+  if ([indexes count] != count)
     {
-      [self insertObject: object atIndex: index];
-      object = [enumerator nextObject];
+      [NSException raise: NSInvalidArgumentException
+		  format: @"[%@-%@]: count of array (%"PRIuPTR") differs"
+	@" from count of index set (%"PRIuPTR")",
+	NSStringFromClass([self class]), NSStringFromSelector(_cmd),
+	count, [indexes count]];
+    }
+  if (0 == count)
+    {
+      return;
+    }
+  index = [indexes indexGreaterThanIndex: [self count] + count - 1];
+  if (index != NSNotFound)
+    {
+      [self _raiseRangeExceptionWithIndex: index from: _cmd];
+    }
+
+  /* As on macOS, each run of consecutive indexes inserts its objects one
+   * after another from the first index of the run, skipping objects already
+   * in the set.  Later indexes are not adjusted for skipped objects.
+   */
+  index = [indexes firstIndex];
+  while (index != NSNotFound)
+    {
+      id	object = [array objectAtIndex: i];
+
+      if (0 == i || index != previous + 1)
+	{
+	  position = index;
+	}
+      previous = index;
+      i++;
+      if (NO == [self containsObject: object])
+	{
+	  [self insertObject: object atIndex: position++];
+	}
       index = [indexes indexGreaterThanIndex: index];
     }
 }
@@ -1632,7 +1691,10 @@ static SEL	remSel;
 
 - (void) sortUsingComparator: (NSComparator)comparator
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [self sortWithOptions: 0 usingComparator: comparator];
+#pragma GCC diagnostic pop
 }
 
 - (void) sortWithOptions: (NSSortOptions)options
@@ -1640,9 +1702,12 @@ static SEL	remSel;
 {
   NSUInteger count = [self count];
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [self sortRange: NSMakeRange(0, count)
           options: options
         usingComparator: comparator];
+#pragma GCC diagnostic pop
 }
 
 - (void) sortRange: (NSRange)range

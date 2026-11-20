@@ -115,6 +115,19 @@ randombytes(uint8_t *buf, unsigned len)
   return AUTORELEASE(d);
 }
 
++ (BOOL) randomBytes: (uint8_t*)buffer ofLength: (NSUInteger)length
+{
+  if (NULL == buffer || 0 == length || length > 0xffffffff)
+    {
+      return NO;
+    }
+  if (randombytes(buffer, (unsigned)length) < 0)
+    {
+      return NO;
+    }
+  return YES;
+}
+
 - (NSString*) escapedRepresentation
 {
   char          *buf;
@@ -230,6 +243,25 @@ randombytes(uint8_t *buf, unsigned len)
     }
   return dst;
 }
+
+#if     defined(__APPLE__)
+- (instancetype) initWithBytesNoCopy: (void*)buf
+                              length: (NSUInteger)len
+                        freeFunction: (void (*)(void *buf, NSUInteger len))func
+{
+  if (NULL == func)
+    {
+      return [self initWithBytesNoCopy: buf
+				length: len
+			  freeWhenDone: NO];
+    }
+  return [self initWithBytesNoCopy: buf
+			    length: len
+		       deallocator: ^(void* bytes, NSUInteger length) {
+  (*func)(bytes, length);
+  }];
+}
+#endif
 
 - (NSData*) gunzipped
 {
@@ -375,8 +407,8 @@ randombytes(uint8_t *buf, unsigned len)
 
   while (src < end)
     {
-      char		c = *src++;
-      unsigned char	v;
+      uint8_t	c = *src++;
+      uint8_t	v;
 
       if (isspace(c))
 	{

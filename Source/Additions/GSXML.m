@@ -109,6 +109,8 @@ static SEL usSel;
 
 static xmlExternalEntityLoader  originalLoader = NULL;
 
+#define	SAXH(X)	((GSSAXHandler*)(((xmlParserCtxtPtr)X)->_private))
+
 /*
  * Macro to cast results to correct type for libxml2
  */
@@ -449,6 +451,10 @@ static NSMapTable	*attrNames = 0;
 
 - (void) dealloc
 {
+  if (_xslt)
+    {
+      xsltFreeStylesheet(_xslt);
+    }
   if (_ownsLib == YES && lib != NULL)
     {
       xmlFreeDoc(lib);
@@ -1982,6 +1988,7 @@ static NSString	*endMarker = @"At end of incremental parse";
     {
       xmlParserCtxtPtr	ctxt = (xmlParserCtxtPtr)lib;
 
+      SAXH(lib)->stopped = YES;
 #ifdef	HAVE_XMLSTOPPARSER
       xmlStopParser(ctxt);
 #else
@@ -2021,10 +2028,29 @@ static NSString	*endMarker = @"At end of incremental parse";
  */
 - (BOOL) doValidityChecking: (BOOL)yesno
 {
-  BOOL	old;
+  xmlParserCtxtPtr	ctx = (xmlParserCtxtPtr)lib;
+  GSSAXHandler		*handler = (GSSAXHandler*)(ctx->_private);
+  BOOL			old = handler->validate;
 
-  old = (((xmlParserCtxtPtr)lib)->validate) ? YES : NO;
-  ((xmlParserCtxtPtr)lib)->validate = (yesno ? 1 : 0);
+  if (yesno != old)
+    {
+#if	defined(HAVE_XMLCTXTGETOPTIONS)
+      int 	options = xmlCtxtGetOptions(ctx);
+
+      if (yesno)
+	{
+	  options |= XML_PARSE_DTDVALID;
+	}
+      else
+	{
+	  options &= ~XML_PARSE_DTDVALID;
+	}
+      xmlCtxtSetOptions(ctx, options);
+#else
+      ctx->validate = (yesno ? 1 : 0);
+#endif
+      handler->validate = (yesno ? YES : NO);
+    }
   return old;
 }
 
@@ -2234,10 +2260,29 @@ static NSString	*endMarker = @"At end of incremental parse";
  */
 - (BOOL) keepBlanks: (BOOL)yesno
 {
-  BOOL	old;
+  xmlParserCtxtPtr	ctx = (xmlParserCtxtPtr)lib;
+  GSSAXHandler		*handler = (GSSAXHandler*)(ctx->_private);
+  BOOL			old = handler->keepBlanks;
 
-  old = (((xmlParserCtxtPtr)lib)->keepBlanks) ? YES : NO;
-  ((xmlParserCtxtPtr)lib)->keepBlanks = (yesno ? 1 : 0);
+  if (yesno != old)
+    {
+#if	defined(HAVE_XMLCTXTGETOPTIONS)
+      int 	options = xmlCtxtGetOptions(ctx);
+
+      if (yesno)
+	{
+	  options &= ~XML_PARSE_NOBLANKS;
+	}
+      else
+	{
+	  options |= XML_PARSE_NOBLANKS;
+	}
+      xmlCtxtSetOptions(ctx, options);
+#else
+      ctx->keepBlanks = (yesno ? 1 : 0);
+#endif
+      handler->keepBlanks = (yesno ? YES : NO);
+    }
   return old;
 }
 
@@ -2338,7 +2383,7 @@ static NSString	*endMarker = @"At end of incremental parse";
   RELEASE(tmp);
 
   if (((xmlParserCtxtPtr)lib)->wellFormed != 0
-    && (0 == ((xmlParserCtxtPtr)lib)->validate
+    && (NO == SAXH(lib)->validate
       || ((xmlParserCtxtPtr)lib)->valid != 0))
     {
       return YES;
@@ -2394,7 +2439,7 @@ static NSString	*endMarker = @"At end of incremental parse";
 	  [self _parseChunk: nil];
 	  src = endMarker;
           if (((xmlParserCtxtPtr)lib)->wellFormed != 0
-            && (0 == ((xmlParserCtxtPtr)lib)->validate
+            && (NO == SAXH(lib)->validate
               || ((xmlParserCtxtPtr)lib)->valid != 0))
             {
               return YES;
@@ -2456,12 +2501,29 @@ static NSString	*endMarker = @"At end of incremental parse";
  */
 - (BOOL) substituteEntities: (BOOL)yesno
 {
-  xmlParserCtxtPtr	context = (xmlParserCtxtPtr)lib;
-  BOOL			old;
+  xmlParserCtxtPtr	ctx = (xmlParserCtxtPtr)lib;
+  GSSAXHandler		*handler = (GSSAXHandler*)(ctx->_private);
+  BOOL			old = handler->replaceEntities;
 
-  old = context->replaceEntities ? YES : NO;
-  context->replaceEntities = (yesno ? 1 : 0);
-  
+  if (yesno != old)
+    {
+#if     defined(HAVE_XMLCTXTGETOPTIONS)
+      int 	options = xmlCtxtGetOptions(ctx);
+
+      if (yesno)
+	{
+	  options |= XML_PARSE_NOENT;
+	}
+      else
+	{
+	  options &= ~XML_PARSE_NOENT;
+	}
+      xmlCtxtSetOptions(ctx, options);
+#else
+      ctx->replaceEntities = (yesno ? 1 : 0);
+#endif
+      handler->replaceEntities = (yesno ? YES : NO);
+    }
   return old;
 }
 
@@ -2534,7 +2596,7 @@ static NSString	*endMarker = @"At end of incremental parse";
 // nil data allowed
 - (void) _parseChunk: (NSData*)data
 {
-  if (lib == NULL || ((xmlParserCtxtPtr)lib)->disableSAX != 0)
+  if (lib == NULL || SAXH(lib)->stopped)
     {
       return;	// Parsing impossible or disabled.
     }
@@ -2636,6 +2698,7 @@ static NSString	*endMarker = @"At end of incremental parse";
     }
 }
 
+
 /*
  * The context is a xmlParserCtxtPtr or htmlParserCtxtPtr.
  * Its _private member contains the address of our Sax Handler Object.
@@ -2694,7 +2757,7 @@ getEntityDefault(void *ctx, const xmlChar *name)
       /* In older versions we may need to parse the entity content.
        */
       if ((ret != NULL)
-        && ((ctxt->validate) || (ctxt->replaceEntities))
+        && ((SAXH(ctxt)->validate) || (ctxt->replaceEntities))
         && (ret->children == NULL)
         && (ret->etype == XML_EXTERNAL_GENERAL_PARSED_ENTITY))
         {
@@ -2716,7 +2779,7 @@ getEntityDefault(void *ctx, const xmlChar *name)
 	      ((((xmlParserCtxtPtr)ctxt)->sax)->fatalError)(ctxt,
 		"Failure to process entity %s\n", name);
 	      xmlStopParser(ctxt);
-	      ctxt->validate = 0;
+	      SAXH(ctxt)->validate = NO;
 	      return NULL;
 	    }
 	  ret->owner = 1;
@@ -2762,7 +2825,7 @@ loadEntityFunction(const unsigned char *url,
   parser = [HANDLER parser];
   if (NO == [parser _resolves])
     {
-      if (cp->inSubset && cp->validate)
+      if (cp->inSubset && SAXH(cp)->validate)
 	{
 	  /* Resolving of external entities is turned off, but we are
 	   * doing validity checking and are loading a subset, so we
@@ -3739,7 +3802,7 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
  */
 - (BOOL) _initLibXML
 {
-  lib = (xmlSAXHandler*)malloc(sizeof(xmlSAXHandler));
+  lib = (xmlSAXHandler*)calloc(1, sizeof(xmlSAXHandler));
   if (lib == NULL)
     {
       return NO;
@@ -3858,7 +3921,7 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
 
 - (BOOL) _initLibXML
 {
-  lib = (xmlSAXHandler*)malloc(sizeof(xmlSAXHandler));
+  lib = (xmlSAXHandler*)calloc(1, sizeof(xmlSAXHandler));
   if (lib == NULL)
     {
       return NO;
@@ -3926,7 +3989,7 @@ fatalErrorFunction(void *ctx, const unsigned char *msg, ...)
 - (BOOL) _initLibXML
 {
   isHtmlHandler = YES;
-  lib = (xmlSAXHandler*)malloc(sizeof(htmlSAXHandler));
+  lib = (xmlSAXHandler*)calloc(1, sizeof(htmlSAXHandler));
   if (lib == NULL)
     {
       return NO;
@@ -4274,6 +4337,7 @@ static BOOL warned = NO; if (warned == NO) { warned = YES; NSLog(@"WARNING, use 
 - (GSXMLDocument*) doc { static BOOL warned = NO; if (warned == NO) { warned = YES; NSLog(@"WARNING, use of deprecated method ... [%@ -%@]", NSStringFromClass([self class]), NSStringFromSelector(_cmd)); } return [self document]; }
 @end
 
+
 @implementation GSXMLDocument (XSLT)
 #ifdef HAVE_LIBXSLT
 /**
@@ -4413,14 +4477,39 @@ static BOOL warned = NO; if (warned == NO) { warned = YES; NSLog(@"WARNING, use 
                           params: (NSDictionary*)params
 {
   GSXMLDocument		*newdoc = nil;
+  xsltStylesheetPtr	ss;
+
+  if (NULL == xsltStylesheet || NULL == xsltStylesheet->lib || NULL == lib)
+    {
+      return nil;
+    }
+  if (nil == xsltStylesheet->_xslt)
+    {
+      xmlDocPtr 	doc = xmlCopyDoc((xmlDocPtr)[xsltStylesheet lib], 1);
+
+      if (NULL == doc)
+	{
+	  return nil;
+	}
+      ss = xsltParseStylesheetDoc(doc);
+      if (ss)
+	{
+	  xsltStylesheet->_xslt = ss;
+	}
+      else
+	{
+	  xmlFreeDoc(doc);
+	  return nil;
+	}
+    }
+  ss = (xsltStylesheetPtr)xsltStylesheet->_xslt; // The compiled style sheet
 
   NS_DURING
     {
-      xsltStylesheetPtr ss = NULL;
-      xmlDocPtr		ssXml = (xmlDocPtr)[xsltStylesheet lib];
       int		pSize = params == nil ? 1 : ([params count] * 2) + 1;
       int		pNum = 0;
       const char	*parameters[pSize];
+      xmlDocPtr		res;
 
       if (params != nil)
 	{
@@ -4439,26 +4528,15 @@ static BOOL warned = NO; if (warned == NO) { warned = YES; NSLog(@"WARNING, use 
 	}
       parameters[pNum] = NULL;
 
-      ss = xsltParseStylesheetDoc(ssXml);
-      if (xsltStylesheet != NULL)
+      res = xsltApplyStylesheet(ss, lib, parameters);
+      if (res != NULL)
 	{
-	  xmlDocPtr	res = NULL;
-
-	  res = xsltApplyStylesheet(ss, lib, parameters);
-	  if (res != NULL)
-	    {
-	      newdoc = [GSXMLDocument alloc];
-	      newdoc = [newdoc _initFrom: res
-				  parent: self
-				 ownsLib: YES];
-	      IF_NO_ARC([newdoc autorelease];)
-	    }
+	  newdoc = [GSXMLDocument alloc];
+	  newdoc = [newdoc _initFrom: res
+			      parent: self
+			     ownsLib: YES];
+	  IF_NO_ARC([newdoc autorelease];)
 	}
-      /*
-       * N.B. We don't want to call xsltFreeStylesheet() to free the
-       * stylesheet xmlDocPtr because that will destroy the lib which
-       * is owned by the xsltStylesheet object.
-       */
       xsltCleanupGlobals();
     }
   NS_HANDLER

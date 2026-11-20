@@ -34,6 +34,7 @@
 #import "Foundation/NSEnumerator.h"
 #import "Foundation/NSCoder.h"
 #import "Foundation/NSData.h"
+#import "Foundation/NSPropertyList.h"
 #import "Foundation/NSRange.h"
 #import "Foundation/NSException.h"
 #import "Foundation/NSAutoreleasePool.h"
@@ -149,10 +150,8 @@ static SEL	rlSel;
       remSel = @selector(removeObjectAtIndex:);
       rlSel = @selector(removeLastObject);
 
-      NSArrayClass = [NSArray class];
-      NSMutableArrayClass = [NSMutableArray class];
+      NSArrayClass = self;
       GSArrayClass = [GSArray class];
-      GSMutableArrayClass = [GSMutableArray class];
       GSPlaceholderArrayClass = [GSPlaceholderArray class];
 
       /*
@@ -163,6 +162,8 @@ static SEL	rlSel;
       placeholderMap = NSCreateMapTable(NSNonOwnedPointerMapKeyCallBacks,
 	NSNonRetainedObjectMapValueCallBacks, 0);
       [self registerAtExit];
+      NSMutableArrayClass = [NSMutableArray class];
+      GSMutableArrayClass = [GSMutableArray class];
     }
 }
 
@@ -744,7 +745,7 @@ static SEL	rlSel;
       id	array;
 
       array = [(NSKeyedUnarchiver*)aCoder _decodeArrayOfObjectsForKey:
-						@"NS.objects"];
+	@"NS.objects"];
       if (array == nil)
 	{
 	  NSUInteger	i = 0;
@@ -759,7 +760,8 @@ static SEL	rlSel;
 	    {
 	      [array addObject: val];
 	      i++;
-	      key = [NSString stringWithFormat: @"NS.object.%lu", (unsigned long)i];
+	      key = [NSString stringWithFormat:
+		@"NS.object.%lu", (unsigned long)i];
 	      val = [(NSKeyedUnarchiver*)aCoder decodeObjectForKey: key];
 	    }
 	}
@@ -798,24 +800,23 @@ static SEL	rlSel;
  * <p>Initialises the array with the contents of the specified file,
  * which must contain an array in property-list format.
  * </p>
- * <p>In GNUstep, the property-list format may be either the OpenStep
- * format (ASCII data), or the MacOS-X format (UTF-8 XML data) ... this
- * method will recognise which it is.
+ * <p>The property list may be in any format NSPropertyListSerialization
+ * reads: binary, XML or OpenStep ... this method recognises which it is.
  * </p>
  * <p>If there is a failure to load the file for any reason, the receiver
  * will be released, the method will return nil, and a warning may be logged.
  * </p>
- * <p>Works by invoking [NSString-initWithContentsOfFile:] and
- * [NSString-propertyList] then checking that the result is an array.
+ * <p>Works by reading the data and parsing it with
+ * [NSPropertyListSerialization+propertyListWithData:options:format:error:]
+ * then checking that the result is an array.
  * </p>
  */
 - (id) initWithContentsOfFile: (NSString*)file
 {
-  NSString 	*myString;
+  NSData	*data;
 
-  myString = [[NSString allocWithZone: NSDefaultMallocZone()]
-    initWithContentsOfFile: file];
-  if (myString == nil)
+  data = [NSData dataWithContentsOfFile: file];
+  if (data == nil)
     {
       DESTROY(self);
     }
@@ -823,16 +824,19 @@ static SEL	rlSel;
     {
       id result;
 
+      /* Any format: the data says which (binary, XML or OpenStep). */
       NS_DURING
 	{
-	  result = [myString propertyList];
+	  result = [NSPropertyListSerialization propertyListWithData: data
+	    options: NSPropertyListMutableContainers
+	    format: NULL
+	    error: NULL];
 	}
       NS_HANDLER
 	{
           result = nil;
 	}
       NS_ENDHANDLER
-      RELEASE(myString);
       if ([result isKindOfClass: NSArrayClass])
 	{
 	  //self = [self initWithArray: result];
@@ -855,24 +859,23 @@ static SEL	rlSel;
  * <p>Initialises the array with the contents of the specified URL,
  * which must contain an array in property-list format.
  * </p>
- * <p>In GNUstep, the property-list format may be either the OpenStep
- * format (ASCII data), or the MacOS-X format (UTF8 XML data) ... this
- * method will recognise which it is.
+ * <p>The property list may be in any format NSPropertyListSerialization
+ * reads: binary, XML or OpenStep ... this method recognises which it is.
  * </p>
  * <p>If there is a failure to load the URL for any reason, the receiver
  * will be released, the method will return nil, and a warning may be logged.
  * </p>
- * <p>Works by invoking [NSString-initWithContentsOfURL:] and
- * [NSString-propertyList] then checking that the result is an array.
+ * <p>Works by reading the data and parsing it with
+ * [NSPropertyListSerialization+propertyListWithData:options:format:error:]
+ * then checking that the result is an array.
  * </p>
  */
 - (id) initWithContentsOfURL: (NSURL*)aURL
 {
-  NSString 	*myString;
+  NSData	*data;
 
-  myString = [[NSString allocWithZone: NSDefaultMallocZone()]
-    initWithContentsOfURL: aURL];
-  if (myString == nil)
+  data = [NSData dataWithContentsOfURL: aURL];
+  if (data == nil)
     {
       DESTROY(self);
     }
@@ -880,16 +883,19 @@ static SEL	rlSel;
     {
       id result;
 
+      /* Any format: the data says which (binary, XML or OpenStep). */
       NS_DURING
 	{
-	  result = [myString propertyList];
+	  result = [NSPropertyListSerialization propertyListWithData: data
+	    options: NSPropertyListMutableContainers
+	    format: NULL
+	    error: NULL];
 	}
       NS_HANDLER
 	{
           result = nil;
 	}
       NS_ENDHANDLER
-      RELEASE(myString);
       if ([result isKindOfClass: NSArrayClass])
 	{
 	  self = [self initWithArray: result];
@@ -1154,14 +1160,20 @@ compare(id elem1, id elem2, void* context)
 
   sortedArray = AUTORELEASE([[NSMutableArrayClass allocWithZone:
     NSDefaultMallocZone()] initWithArray: self copyItems: NO]);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [sortedArray sortWithOptions: options usingComparator: comparator];
+#pragma GCC diagnostic pop
 
   return GS_IMMUTABLE(sortedArray);
 }
 
 - (NSArray*) sortedArrayUsingComparator: (NSComparator)comparator
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self sortedArrayWithOptions: 0 usingComparator: comparator];
+#pragma GCC diagnostic pop
 }
 
 - (NSUInteger) indexOfObject: (id)key
@@ -1798,7 +1810,10 @@ compare(id elem1, id elem2, void* context)
 
 - (void) enumerateObjectsUsingBlock: (GSEnumeratorBlock)aBlock
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [self enumerateObjectsWithOptions: 0 usingBlock: aBlock];
+#pragma GCC diagnostic pop
 }
 
 - (void) enumerateObjectsWithOptions: (NSEnumerationOptions)opts
@@ -1843,8 +1858,11 @@ compare(id elem1, id elem2, void* context)
 			   options: (NSEnumerationOptions)opts
 		        usingBlock: (GSEnumeratorBlock)block
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [[self objectsAtIndexes: indexSet] enumerateObjectsWithOptions: opts
 						      usingBlock: block];
+#pragma GCC diagnostic pop
 }
 
 - (NSIndexSet *) indexesOfObjectsWithOptions: (NSEnumerationOptions)opts
@@ -1908,21 +1926,27 @@ compare(id elem1, id elem2, void* context)
 
 - (NSIndexSet*) indexesOfObjectsPassingTest: (GSPredicateBlock)predicate
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self indexesOfObjectsWithOptions: 0 passingTest: predicate];
+#pragma GCC diagnostic pop
 }
 
 - (NSIndexSet*) indexesOfObjectsAtIndexes: (NSIndexSet*)indexSet
 				  options: (NSEnumerationOptions)opts
 			      passingTest: (GSPredicateBlock)predicate
 {
-  NSIndexSet *rindexes =[[self objectsAtIndexes: indexSet]
-			 indexesOfObjectsWithOptions: opts
-					 passingTest: predicate];
-  NSUInteger count = [indexSet count];
-  NSUInteger resultCount = [rindexes count];
-  NSUInteger indexArray[count], resultIndexArray[resultCount];
-  NSMutableIndexSet *resultSet = [NSMutableIndexSet indexSet];
-  NSUInteger i = 0;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  NSIndexSet		*rindexes = [[self objectsAtIndexes: indexSet]
+				indexesOfObjectsWithOptions: opts
+						passingTest: predicate];
+#pragma GCC diagnostic pop
+  NSUInteger		count = [indexSet count];
+  NSUInteger		resultCount = [rindexes count];
+  NSUInteger 		indexArray[count], resultIndexArray[resultCount];
+  NSMutableIndexSet	*resultSet = [NSMutableIndexSet indexSet];
+  NSUInteger		i = 0;
   
   [indexSet getIndexes: indexArray
 	      maxCount: count
@@ -1933,10 +1957,11 @@ compare(id elem1, id elem2, void* context)
 	  inIndexRange: NULL];
 
   // interate over indexes and collect the matching ones..
-  for(i = 0; i < resultCount; i++)
+  for (i = 0; i < resultCount; i++)
     {
-      NSUInteger rindx = resultIndexArray[i];
-      NSUInteger indx = indexArray[rindx];
+      NSUInteger	rindx = resultIndexArray[i];
+      NSUInteger	indx = indexArray[rindx];
+
       [resultSet addIndex: indx];
     }
 
@@ -2009,18 +2034,24 @@ compare(id elem1, id elem2, void* context)
 
 - (NSUInteger) indexOfObjectPassingTest: (GSPredicateBlock)predicate
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self indexOfObjectWithOptions: 0 passingTest: predicate];
+#pragma GCC diagnostic pop
 }
 
 - (NSUInteger) indexOfObjectAtIndexes: (NSIndexSet*)indexSet
 			      options: (NSEnumerationOptions)opts
 			  passingTest: (GSPredicateBlock)predicate
 {
-  NSUInteger index = [[self objectsAtIndexes: indexSet]
-		       indexOfObjectWithOptions: 0
-				    passingTest: predicate];
-  NSUInteger count = [indexSet count];
-  NSUInteger indexArray[count];
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  NSUInteger		index = [[self objectsAtIndexes: indexSet]
+			       indexOfObjectWithOptions: 0
+					    passingTest: predicate];
+#pragma GCC diagnostic pop
+  NSUInteger		count = [indexSet count];
+  NSUInteger		indexArray[count];
 
   [indexSet getIndexes: indexArray
 	      maxCount: count
@@ -2042,6 +2073,13 @@ compare(id elem1, id elem2, void* context)
 {
   if (self == [NSMutableArray class])
     {
+      /* +allocWithZone: relies on these.  Set them here rather than only
+       * in +[NSArray initialize]: when that method's [NSMutableArray class]
+       * initializes this class, other threads can use NSMutableArray
+       * before +[NSArray initialize] has assigned them.
+       */
+      NSMutableArrayClass = self;
+      GSMutableArrayClass = [GSMutableArray class];
     }
 }
 
@@ -2675,7 +2713,10 @@ compare(id elem1, id elem2, void* context)
 
 - (void) sortUsingComparator: (NSComparator)comparator
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [self sortWithOptions: 0 usingComparator: comparator];
+#pragma GCC diagnostic pop
 }
 @end
 

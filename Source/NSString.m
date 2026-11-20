@@ -131,6 +131,23 @@
 # include <icu.h>
 #endif
 
+
+#if GS_USE_ICU
+// These macros may be useful elsewhere.
+#define GS_U_HANDLE_ERROR_RETVAL(errorCode, description, returnValue) do { \
+  if (U_FAILURE(errorCode)) { \
+    NSWarnMLog(@"Error " description ": %s", u_errorName(errorCode)); \
+    return returnValue; \
+  } else if (errorCode < U_ZERO_ERROR) { \
+    NSWarnMLog(@"Warning " description ": %s", u_errorName(errorCode)); \
+  } \
+  errorCode = U_ZERO_ERROR; \
+} while (NO)
+
+#define GS_U_HANDLE_ERROR(errorCode, description) GS_U_HANDLE_ERROR_RETVAL(errorCode, description,)
+#endif
+
+
 /* Create local inline versions of key functions for case-insensitive operations
  */
 #import "Additions/unicode/caseconv.h"
@@ -571,11 +588,17 @@ _GSICUCollatorCreate(NSStringCompareOptions mask, const char *localeCString)
   UErrorCode status = U_ZERO_ERROR;
   UCollator *coll;
 
+  /* The system locale: the root collation, as with no locale at all. */
+  if (localeCString == NULL || strcmp(localeCString, "en_US_POSIX") == 0)
+    {
+      localeCString = "";
+    }
   coll = ucol_open(localeCString, &status);
 
   if (U_SUCCESS(status))
     {
-      if (mask & (NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch))
+      if ((mask & NSCaseInsensitiveSearch)
+        && (mask & NSDiacriticInsensitiveSearch))
 	{
 	  ucol_setStrength(coll, UCOL_PRIMARY);
 	}
@@ -853,7 +876,8 @@ GSStringApplyTransliterator(const unichar *src,
 	textLen = srcLen;
 	limit = textLen;
 	err = U_ZERO_ERROR;
-	utrans_transUChars(trans, (UChar *)dst, &textLen, capacity, 0, &limit, &err);
+	utrans_transUChars(trans, (UChar *)dst, &textLen, capacity,
+	  0, &limit, &err);
 	if (err == U_BUFFER_OVERFLOW_ERROR)
 	  {
 	    unichar	*tmp;
@@ -875,7 +899,7 @@ GSStringApplyTransliterator(const unichar *src,
 	  {
 	    if (dstOnStack == NO)
 	      {
-		      free(dst);
+	        free(dst);
 	      }
 	    [NSException raise: NSCharacterConversionException
 			format: @"libicu transliteration failed"];
@@ -886,7 +910,7 @@ GSStringApplyTransliterator(const unichar *src,
     result = [NSString stringWithCharacters: dst length: textLen];
     if (dstOnStack == NO)
       {
-	      free(dst);
+	free(dst);
       }
     return result;
   }
@@ -1375,6 +1399,15 @@ register_printf_atsign ()
   if (NULL == aString)
     [NSException raise: NSInvalidArgumentException
       format: @"[NSString+stringWithString:]: NULL string"];
+  if (self == NSStringClass)
+    {
+      /* Each concrete string class settles in -copyWithZone: whether it may
+       * be shared, and answers a full copy where it may not, so a copy is
+       * both what this method promises and the cheapest thing that keeps
+       * that promise.
+       */
+      return AUTORELEASE([aString copy]);
+    }
   obj = [self allocWithZone: NSDefaultMallocZone()];
   obj = [obj initWithString: aString];
   return AUTORELEASE(obj);
@@ -1860,6 +1893,10 @@ register_printf_atsign ()
    * allocated on the stack.  The GSPrivateFormat function can write into it.
    */
   f = (GSStr)alloca(class_getInstanceSize(GSMutableStringClass));
+  /* Set the initial value of the memory to NULL to avoid object_setClass()
+   * being confused.
+   */
+  *(void**)f = NULL;
   object_setClass(f, GSMutableStringClass);
   f->_zone = NSDefaultMallocZone();
   f->_contents.c = buf;
@@ -3330,7 +3367,8 @@ register_printf_atsign ()
       return result;
     }
 
-  if (locale == nil && (mask & NSNumericSearch) == 0)
+  if (locale == nil
+    && (mask & (NSNumericSearch | NSDiacriticInsensitiveSearch)) == 0)
   {
     return strRangeNsNs(self, aString, mask, searchRange);
   }
@@ -3470,8 +3508,18 @@ register_printf_atsign ()
 
 - (NSRange) rangeOfComposedCharacterSequencesForRange: (NSRange)range
 {
+  NSUInteger    length;
   NSRange	startRange;
 
+  length = [self length];
+  if (NSMaxRange(range) > length)
+    {
+      [NSException raise: NSRangeException format:@"Invalid location."];
+    }
+  else if (range.location == length)
+    {
+      return range;
+    }
   startRange = [self rangeOfComposedCharacterSequenceAtIndex: range.location];
   if (NSMaxRange(startRange) >= NSMaxRange(range))
     {
@@ -3753,8 +3801,10 @@ register_printf_atsign ()
 	      if (gotRangeImps == NO)
 		{
 		  gotRangeImps = YES;
-		  srImp=(NSRange (*)())[self methodForSelector: ranSel];
-		  orImp=(NSRange (*)())[aString methodForSelector: ranSel];
+		  srImp=(NSRange (*)(NSString*, SEL, NSUInteger))
+		    [self methodForSelector: ranSel];
+		  orImp=(NSRange (*)(NSString*, SEL, NSUInteger))
+		    [aString methodForSelector: ranSel];
 		}
 	      sRange = (*srImp)(self, ranSel, sIndex);
 	      oRange = (*orImp)(aString, ranSel, oIndex);
@@ -3769,8 +3819,10 @@ register_printf_atsign ()
 		  if (gotFetchImps == NO)
 		    {
 		      gotFetchImps = YES;
-		      sgImp=(void (*)())[self methodForSelector: gcrSel];
-		      ogImp=(void (*)())[aString methodForSelector: gcrSel];
+		      sgImp=(void (*)(NSString*, SEL, unichar*, NSRange))
+			[self methodForSelector: gcrSel];
+		      ogImp=(void (*)(NSString*, SEL, unichar*, NSRange))
+			[aString methodForSelector: gcrSel];
 		    }
 		  (*sgImp)(self, gcrSel, sBuf, sRange);
 		  (*ogImp)(aString, gcrSel, oBuf, oRange);
@@ -3831,7 +3883,8 @@ register_printf_atsign ()
   len = [self length];
   GS_RANGE_CHECK(aRange, len);
 
-  caiImp = (unichar (*)())[self methodForSelector: caiSel];
+  caiImp = (unichar (*)(NSString*, SEL, NSUInteger))
+    [self methodForSelector: caiSel];
   /* Place aRange.location at the beginning of a CR-LF sequence */
   if (aRange.location > 0 && aRange.location < len
     && (*caiImp)(self, caiSel, aRange.location - 1) == (unichar)'\r'
@@ -4141,6 +4194,180 @@ register_printf_atsign ()
   return AUTORELEASE([[NSStringClass allocWithZone: NSDefaultMallocZone()]
     initWithCharactersNoCopy: s length: len freeWhenDone: YES]);
 }
+
+
+enum GSStringOption {
+  GSStringOptionUppercase = 0,
+  GSStringOptionLowercase = 1,
+  GSStringOptionCapitalized = 2
+};
+
+- (NSString *) _localizedStringConversion: (enum GSStringOption)option
+			       withLocale: (NSLocale*)locale
+{
+#if GS_USE_ICU
+  UErrorCode		code;
+  NSMutableData 	*destination;
+  NSData 		*source;
+  NSUInteger 		sourceLength;
+  NSInteger 		destLength;
+  UChar 		*sourceBuffer;
+  const char		*localeUTF8;
+
+  code = U_ZERO_ERROR;
+  source = [self dataUsingEncoding: NSUTF16StringEncoding
+	      allowLossyConversion: NO];
+  if (nil == source)
+    {
+      return nil;
+    }
+
+  sourceLength = [source length]/sizeof(UChar);
+  sourceBuffer = (UChar *)[source bytes];
+  localeUTF8 = [[locale localeIdentifier] UTF8String];
+
+  if (option == GSStringOptionUppercase)
+    {
+      destLength = u_strToUpper(NULL,
+	0,
+	sourceBuffer,
+	sourceLength,
+	localeUTF8,
+	&code);
+      if (code != U_BUFFER_OVERFLOW_ERROR)
+	{
+	  GS_U_HANDLE_ERROR_RETVAL(code,
+	    "while getting length for uppercase conversion", nil);
+	}
+      code = U_ZERO_ERROR;
+
+      destLength += 1;
+      destination = [NSMutableData dataWithLength: destLength * sizeof(UChar)];
+      destLength = u_strToUpper((UChar *)[destination mutableBytes],
+	destLength,
+	sourceBuffer,
+	sourceLength,
+	localeUTF8,
+	&code);
+      GS_U_HANDLE_ERROR_RETVAL(code,
+	"while performing uppercase conversion", nil);
+    }
+  else if (option == GSStringOptionLowercase)
+    {
+      destLength = u_strToLower(NULL,
+	0,
+	sourceBuffer,
+	sourceLength,
+	localeUTF8,
+	&code);
+      if (code != U_BUFFER_OVERFLOW_ERROR)
+	{
+	  GS_U_HANDLE_ERROR_RETVAL(code,
+	    "while getting length for lowercase conversion", nil);
+	}
+      code = U_ZERO_ERROR;
+
+      destLength += 1;
+      destination = [NSMutableData dataWithLength: destLength * sizeof(UChar)];
+      destLength = u_strToLower((UChar *)[destination mutableBytes],
+	destLength,
+	sourceBuffer,
+	sourceLength,
+	localeUTF8,
+	&code);
+      GS_U_HANDLE_ERROR_RETVAL(code,
+	"while performing lowercase conversion", nil);
+    }
+  else if (option == GSStringOptionCapitalized)
+    {
+      destLength = u_strToTitle(NULL,
+	0,
+	sourceBuffer,
+	sourceLength,
+	NULL,
+	localeUTF8,
+	&code);
+      code = U_ZERO_ERROR;
+      if (code != U_BUFFER_OVERFLOW_ERROR)
+	{
+	  GS_U_HANDLE_ERROR_RETVAL(code,
+	    "while getting length for titlecase conversion", nil);
+	}
+      code = U_ZERO_ERROR;
+
+      destLength += 1;
+      destination = [NSMutableData dataWithLength: destLength * sizeof(UChar)];
+      destLength = u_strToTitle((UChar *)[destination mutableBytes],
+	destLength,
+	sourceBuffer,
+	sourceLength,
+	NULL,
+	localeUTF8,
+	&code);
+      if (code != U_ZERO_ERROR && code != U_USING_DEFAULT_WARNING)
+	{
+	  GS_U_HANDLE_ERROR_RETVAL(code,
+	    "while performing titlecase conversion", nil);
+	}
+    }
+  else
+    {
+      return nil;
+    }
+
+  return AUTORELEASE([[NSString alloc] initWithData: destination
+					   encoding: NSUTF16StringEncoding]);
+  #else
+  return [self uppercaseString];
+  #endif // GS_USE_ICU
+}
+
+- (NSString*) uppercaseStringWithLocale: (NSLocale*)locale
+{
+  if (locale == nil)
+    {
+      locale = [NSLocale currentLocale];
+    }
+  return [self _localizedStringConversion: GSStringOptionUppercase
+			       withLocale: locale];
+}
+
+- (NSString*) lowercaseStringWithLocale: (NSLocale*)locale
+{
+  if (locale == nil)
+    {
+      locale = [NSLocale currentLocale];
+    }
+  return [self _localizedStringConversion: GSStringOptionLowercase
+			       withLocale: locale];
+}
+
+- (NSString*) capitalizedStringWithLocale: (NSLocale*)locale
+{
+  if (locale == nil)
+    {
+      locale = [NSLocale currentLocale];
+    }
+  return [self _localizedStringConversion: GSStringOptionCapitalized
+			       withLocale: locale];
+}
+
+- (NSString*) localizedUppercaseString
+{
+  return [self uppercaseStringWithLocale: nil];
+}
+
+- (NSString*) localizedLowercaseString
+{
+  return [self lowercaseStringWithLocale: nil];
+}
+
+
+- (NSString*) localizedCapitalizedString
+{
+  return [self capitalizedStringWithLocale: nil];
+}
+
 
 // Storing the String
 
@@ -4529,7 +4756,7 @@ register_printf_atsign ()
 {
   const char *ptr = [self UTF8String];
 
-  while (isspace(*ptr))
+  while (isspace(*(const uint8_t*)ptr))
     {
       ptr++;
     }
@@ -4550,7 +4777,7 @@ register_printf_atsign ()
 {
   const char *ptr = [self UTF8String];
 
-  while (isspace(*ptr))
+  while (isspace(*(const uint8_t*)ptr))
     {
       ptr++;
     }
@@ -4571,7 +4798,7 @@ register_printf_atsign ()
 {
   const char *ptr = [self UTF8String];
 
-  while (isspace(*ptr))
+  while (isspace(*(const uint8_t*)ptr))
     {
       ptr++;
     }
@@ -5173,6 +5400,11 @@ static NSFileManager *fm = nil;
   unsigned	l = [self length];
   unsigned 	originalLength = l;
   unsigned	root;
+
+  if ([aString length] == 0)
+    {
+      return IMMUTABLE(self);
+    }
 
   if (l == 0)
     {
@@ -5886,7 +6118,8 @@ static NSFileManager *fm = nil;
   l = [s length];
   root = rootOf(s, l);
 
-  caiImp = (unichar (*)())[s methodForSelector: caiSel];
+  caiImp = (unichar (*)(NSString*, SEL, NSUInteger))
+    [s methodForSelector: caiSel];
 
   /* Remove any separators ('/') immediately after the trailing
    * separator in the root (if any).
@@ -6062,7 +6295,8 @@ static NSFileManager *fm = nil;
       BOOL	(*mImp)(id, SEL, unichar);
       unichar	letter;
 
-      caiImp = (unichar (*)())[self methodForSelector: caiSel];
+      caiImp = (unichar (*)(NSString*, SEL, NSUInteger))
+	[self methodForSelector: caiSel];
       mImp = (BOOL(*)(id,SEL,unichar)) [aSet methodForSelector: cMemberSel];
 
       while (end > 0)
@@ -6106,7 +6340,8 @@ static NSFileManager *fm = nil;
       unsigned int	count = 0;
       unichar	(*caiImp)(NSString*, SEL, NSUInteger);
 
-      caiImp = (unichar (*)())[self methodForSelector: caiSel];
+      caiImp = (unichar (*)(NSString*, SEL, NSUInteger))
+	[self methodForSelector: caiSel];
       while (count < len)
 	{
 	  if (!uni_isnonsp((*caiImp)(self, caiSel, count++)))
@@ -6353,7 +6588,8 @@ static NSFileManager *fm = nil;
    * comparison.) - so return NULL to indicate that the GNUstep
    * comparison code should be used.
    */
-  if (locale == nil && (mask & NSNumericSearch) == 0)
+  if (locale == nil
+    && (mask & (NSNumericSearch | NSDiacriticInsensitiveSearch)) == 0)
     {
       return strCompNsNs(self, string, mask, compareRange);
     }
@@ -6945,17 +7181,6 @@ static NSFileManager *fm = nil;
     || substringType == NSStringEnumerationBySentences)
     {
 #if GS_USE_ICU
-      // These macros may be useful elsewhere.
-      #define GS_U_HANDLE_ERROR(errorCode, description) do { \
-        if (U_FAILURE(errorCode)) { \
-          NSWarnMLog(@"Error " description ": %s", u_errorName(errorCode)); \
-          return; \
-        } else if (errorCode < U_ZERO_ERROR) { \
-          NSWarnMLog(@"Warning " description ": %s", u_errorName(errorCode)); \
-        } \
-        errorCode = U_ZERO_ERROR; \
-      } while (NO)
-
       BOOL		byWords = substringType == NSStringEnumerationByWords;
       NSUInteger	length = range.length;
       UChar 		characters[length];

@@ -40,6 +40,22 @@
 #  endif
 #endif
 
+#if GS_USE_LIBDISPATCH && HAVE_DISPATCH_AUTORELEASE_POOL_HOOKS
+#  include <dispatch/dispatch.h>
+/* Declared only in libdispatch's private header, which isn't normally
+ * installed.
+ */
+DISPATCH_EXPORT void *(*_dispatch_begin_NSAutoReleasePool)(void);
+DISPATCH_EXPORT void (*_dispatch_end_NSAutoReleasePool)(void *);
+#  ifndef ARC_RUNTIME
+/* Provided by the runtime if it has them, otherwise by
+ * Source/ObjectiveC2/autorelease.m
+ */
+void *objc_autoreleasePoolPush(void);
+void objc_autoreleasePoolPop(void *pool);
+#  endif
+#endif
+
 
 
 
@@ -394,6 +410,16 @@ pop_pool_from_cache(struct autorelease_thread_vars *tv)
   /* Do nothing here which might interact with ther classes since this
    * is called by [NSObject+initialize] !
    */
+#if GS_USE_LIBDISPATCH && HAVE_DISPATCH_AUTORELEASE_POOL_HOOKS
+  /* Let libdispatch wrap the work it runs on its worker threads in
+   * autorelease pools.
+   */
+  if (NULL == _dispatch_begin_NSAutoReleasePool)
+    {
+      _dispatch_end_NSAutoReleasePool = objc_autoreleasePoolPop;
+      _dispatch_begin_NSAutoReleasePool = objc_autoreleasePoolPush;
+    }
+#endif
   return;
 }
 
@@ -429,19 +455,21 @@ pop_pool_from_cache(struct autorelease_thread_vars *tv)
 
 + (id) new
 {
-  static IMP	allocImp = 0;
-  static IMP	initImp = 0;
+  typedef id (*GSAllocIMP)(id, SEL, NSZone *);
+  typedef id (*GSInitIMP)(id, SEL);
+  static GSAllocIMP	allocImp = 0;
+  static GSInitIMP	initImp = 0;
   id		arp;
 
   if (0 == allocImp)
     {
-      allocImp
-	= [NSAutoreleasePool methodForSelector: @selector(allocWithZone:)];
-      initImp
-	= [NSAutoreleasePool instanceMethodForSelector: @selector(init)];
+      allocImp = (GSAllocIMP)
+	[NSAutoreleasePool methodForSelector: @selector(allocWithZone:)];
+      initImp = (GSInitIMP)
+	[NSAutoreleasePool instanceMethodForSelector: @selector(init)];
     }
-  arp = (*allocImp)(self, @selector(allocWithZone:), NSDefaultMallocZone());
-  return (*initImp)(arp, @selector(init));
+  arp = allocImp(self, @selector(allocWithZone:), NSDefaultMallocZone());
+  return initImp(arp, @selector(init));
 }
 
 #ifdef ARC_RUNTIME
@@ -735,4 +763,3 @@ pop_pool_from_cache(struct autorelease_thread_vars *tv)
 }
 
 @end
-

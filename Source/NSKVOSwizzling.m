@@ -55,7 +55,9 @@
 #import <Foundation/Foundation.h>
 
 #ifdef WIN32
-#define alloca(x) _alloca(x)
+# ifndef	alloca
+#   define alloca(x) _alloca(x)
+# endif
 #endif
 
 #if defined(__OBJC2__) && !defined(NSKVO_FORCE_PORTABLE)
@@ -127,7 +129,7 @@ _NSKVOEnsureObjectIsKVOAware(id object)
     (IMP)(NSKVO$nilIMP), "v@:");
 }
 
-#pragma region Method Implementations
+// ########### Method Implementations
 // Selector mappings: the class-level mapping from a selector (setX:) to the KVC
 // key ("x") to which it corresponds. This is necessary because both "X" and "x"
 // map to setX:, but we need to be cognizant of precisely which it was for any
@@ -138,17 +140,27 @@ _NSKVOEnsureObjectIsKVOAware(id object)
 static inline NSMapTable *
 _selectorMappingsForObject(id object)
 {
-  static char s_selMapKey;
-  Class       cls;
+  static char  s_selMapKey;
+  Class        cls;
+  NSMapTable  *selMappings;
 
   // here we explicitly want the public
   // (non-hidden) class associated with the object.
   cls = object_getClass(object);
 
+  /* Reading an association is synchronized by the runtime.  The class lock is
+   * only needed to stop two threads each building a table, so it is skipped
+   * once one exists, which is every call after the first.
+   */
+  selMappings = (NSMapTable *) objc_getAssociatedObject(cls, &s_selMapKey);
+  if (nil != selMappings)
+    {
+      return selMappings;
+    }
+
   @synchronized(cls)
   {
-    NSMapTable *selMappings
-      = (NSMapTable *) objc_getAssociatedObject(cls, &s_selMapKey);
+    selMappings = (NSMapTable *) objc_getAssociatedObject(cls, &s_selMapKey);
     if (!selMappings)
       {
         selMappings = [NSMapTable
@@ -240,6 +252,7 @@ notifyingVariadicSetImpl(id self, SEL _cmd, ...)
 	default:
 	  NSLog(@"Can't override setter with more than 6"
 	    @" sizeof(long int) stack arguments.");
+	  free(raw);
 	  return;
       }
   }
@@ -445,7 +458,7 @@ NSKVO$removeObjectForKey$(id self, SEL _cmd, NSString *key)
 }
   [self didChangeValueForKey: key];
 }
-#pragma endregion
+
 
 #define GENERATE_NOTIFYING_SET_IMPL(funcName, type)                            \
   static void funcName(id self, SEL _cmd, type val)                            \
@@ -506,7 +519,7 @@ KVCSetterForPropertyName(NSObject *self, const char *key)
   buf[0] = 's';
   buf[1] = 'e';
   buf[2] = 't';
-  buf[3] = toupper(key[0]);
+  buf[3] = toupper(((const uint8_t*)key)[0]);
   buf[3 + len] = ':';
   buf[3 + len + 1] = '\0';
   sel = sel_getUid(buf);
@@ -708,7 +721,7 @@ _NSKVOEnsureKeyWillNotify(id object, NSString *key)
     }
 
   rawKey = mutableBufferFromString(key);
-  rawKey[0] = toupper(rawKey[0]);
+  rawKey[0] = toupper(((const uint8_t*)rawKey)[0]);
 
   @synchronized(object)
   {

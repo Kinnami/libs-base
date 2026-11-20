@@ -764,9 +764,10 @@ GS_ROOT_CLASS @interface	GSDistantObjectPlaceHolder
 	      const char	*types;
 
 	      types = [m methodType];
-	      /* Create a local method signature.
+	      /* Create a local method signature.  The types came from the
+	       * other end of the connection, so it is not cached.
 	       */
-	      m = [NSMethodSignature signatureWithObjCTypes: types];
+	      m = [NSMethodSignature _uncachedSignatureWithObjCTypes: types];
 	    }
 	  if (m != nil)
 	    {
@@ -946,25 +947,6 @@ GS_ROOT_CLASS @interface	GSDistantObjectPlaceHolder
       return size;
     }
   return 0;
-}
-
-@end
-
-
-@implementation Protocol (DistributedObjectsCoding)
-
-- (Class) classForPortCoder
-{
-  return object_getClass(self);
-}
-
-- (id) replacementObjectForPortCoder: (NSPortCoder*)aRmc;
-{
-  if ([aRmc isBycopy])
-    return self;
-  else
-    return [NSDistantObject proxyWithLocal: self
-				connection: [aRmc connection]];
 }
 
 @end

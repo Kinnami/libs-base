@@ -116,24 +116,14 @@
 
 - (void) _performActivity
 {
-# if __has_feature(blocks)
-  NSProcessInfo *pinfo = [NSProcessInfo processInfo];
-
-  [pinfo performActivityWithOptions: _opts
-                             reason: _reason
-                         usingBlock: ^{
-      // TODO: Need to implement the NSProcessInfo performActivity... methods.
-    }];
-# else
-  NSLog(@"No block support, so not running background activity....");
-# endif
+  NSLog(@"No background activity support...");
 }
 
 - (void) scheduleWithBlock: (GSScheduledBlock)block
 {
   NSProcessInfo *pinfo = [NSProcessInfo processInfo];
 
-  ASSIGN(_block, (id)block);
+  ASSIGNCOPY(_block, (id)block);
   switch(_qualityOfService)
     {
     case NSQualityOfServiceUserInteractive:

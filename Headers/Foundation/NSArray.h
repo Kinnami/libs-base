@@ -56,19 +56,22 @@ enum
 typedef NSUInteger NSBinarySearchingOptions;
 #endif
 
+NS_ASSUME_NONNULL_BEGIN
+
 GS_EXPORT_CLASS
 @interface GS_GENERIC_CLASS(NSArray, __covariant ElementT) : NSObject
   <NSCoding, NSSecureCoding, NSCopying, NSMutableCopying, NSFastEnumeration>
 
 + (instancetype) array;
 + (instancetype) arrayWithArray: (GS_GENERIC_CLASS(NSArray, ElementT) *)array;
-+ (instancetype) arrayWithContentsOfFile: (NSString*)file;
++ (instancetype _Nullable) arrayWithContentsOfFile: (NSString*)file;
 #if OS_API_VERSION(GS_API_MACOSX, GS_API_LATEST)
-+ (instancetype) arrayWithContentsOfURL: (NSURL*)aURL;
++ (instancetype _Nullable) arrayWithContentsOfURL: (NSURL*)aURL;
 #endif
 + (instancetype) arrayWithObject: (id)anObject;
 + (instancetype) arrayWithObjects: (id)firstObject, ...;
-+ (instancetype) arrayWithObjects: (const id[])objects count: (NSUInteger)count;
++ (instancetype) arrayWithObjects: (const id _Nonnull [])objects
+                             count: (NSUInteger)count;
 
 - (GS_GENERIC_CLASS(NSArray, ElementT) *) arrayByAddingObject:
   (GS_GENERIC_TYPE(ElementT))anObject;
@@ -80,8 +83,10 @@ GS_EXPORT_CLASS
  * Returns the number of elements contained in the receiver.
  */
 - (NSUInteger) count;
-- (void) getObjects: (__unsafe_unretained GS_GENERIC_TYPE(ElementT)[])aBuffer;
-- (void) getObjects: (__unsafe_unretained GS_GENERIC_TYPE(ElementT)[])aBuffer
+- (void) getObjects:
+  (__unsafe_unretained GS_GENERIC_TYPE(ElementT) _Nonnull [])aBuffer;
+- (void) getObjects:
+  (__unsafe_unretained GS_GENERIC_TYPE(ElementT) _Nonnull [])aBuffer
               range: (NSRange)aRange;
 - (NSUInteger) indexOfObject: (GS_GENERIC_TYPE(ElementT))anObject;
 - (NSUInteger) indexOfObject: (GS_GENERIC_TYPE(ElementT))anObject
@@ -95,9 +100,9 @@ GS_EXPORT_CLASS
 - (instancetype) initWithArray: (GS_GENERIC_CLASS(NSArray, ElementT)*)array
                      copyItems: (BOOL)shouldCopy;
 #endif
-- (instancetype) initWithContentsOfFile: (NSString*)file;
+- (instancetype _Nullable) initWithContentsOfFile: (NSString*)file;
 #if OS_API_VERSION(GS_API_MACOSX, GS_API_LATEST)
-- (instancetype) initWithContentsOfURL: (NSURL*)aURL;
+- (instancetype _Nullable) initWithContentsOfURL: (NSURL*)aURL;
 #endif
 - (instancetype) initWithObjects: (GS_GENERIC_TYPE(ElementT)) firstObject, ...;
 
@@ -108,11 +113,12 @@ GS_EXPORT_CLASS
  * and needs to be re-implemented in subclasses in order to have all
  * other initialisers work.
  */
-- (instancetype) initWithObjects: (const GS_GENERIC_TYPE(ElementT)[])objects
+- (instancetype) initWithObjects:
+  (const GS_GENERIC_TYPE(ElementT) _Nonnull [])objects
                            count: (NSUInteger)count;
-- (GS_GENERIC_TYPE(ElementT)) lastObject;
+- (GS_GENERIC_TYPE(ElementT) _Nullable) lastObject;
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_6, GS_API_LATEST)
-- (GS_GENERIC_TYPE(ElementT)) firstObject;
+- (GS_GENERIC_TYPE(ElementT) _Nullable) firstObject;
 #endif
 
 /** <override-subclass />
@@ -129,27 +135,27 @@ GS_EXPORT_CLASS
   (NSIndexSet *)indexes;
 #endif
 
-- (GS_GENERIC_TYPE(ElementT)) firstObjectCommonWithArray:
+- (GS_GENERIC_TYPE(ElementT) _Nullable) firstObjectCommonWithArray:
     (GS_GENERIC_CLASS(NSArray, ElementT) *)otherArray;
 - (BOOL) isEqualToArray: (NSArray*)otherArray;
 
 #if OS_API_VERSION(GS_API_OPENSTEP, GS_API_MACOSX)
 - (void) makeObjectsPerform: (SEL)aSelector;
-- (void) makeObjectsPerform: (SEL)aSelector withObject: (id)argument;
+- (void) makeObjectsPerform: (SEL)aSelector withObject: (id _Nullable)argument;
 #endif
 #if OS_API_VERSION(GS_API_MACOSX, GS_API_LATEST)
 - (void) makeObjectsPerformSelector: (SEL)aSelector;
-- (void) makeObjectsPerformSelector: (SEL)aSelector withObject: (id)arg;
+- (void) makeObjectsPerformSelector: (SEL)aSelector withObject: (id _Nullable)arg;
 #endif
 
-- (NSData*) sortedArrayHint;
+- (NSData *_Nullable) sortedArrayHint;
 - (GS_GENERIC_CLASS(NSArray, ElementT)*) sortedArrayUsingFunction:
     (NSComparisonResult (*)(id, id, void*))comparator
-			        context: (void*)context;
+			        context: (void *_Nullable)context;
 - (GS_GENERIC_CLASS(NSArray, ElementT)*) sortedArrayUsingFunction:
     (NSComparisonResult (*)(id, id, void*))comparator
-			      context: (void*)context
-				     hint: (NSData*)hint;
+			      context: (void *_Nullable)context
+				     hint: (NSData *_Nullable)hint;
 - (GS_GENERIC_CLASS(NSArray, ElementT)*) sortedArrayUsingSelector:
   (SEL)comparator;
 - (GS_GENERIC_CLASS(NSArray, ElementT)*) subarrayWithRange: (NSRange)aRange;
@@ -162,15 +168,15 @@ GS_EXPORT_CLASS
 - (GS_GENERIC_CLASS(NSEnumerator, ElementT)*) reverseObjectEnumerator;
 
 - (NSString*) description;
-- (NSString*) descriptionWithLocale: (id)locale;
-- (NSString*) descriptionWithLocale: (id)locale
+- (NSString*) descriptionWithLocale: (id _Nullable)locale;
+- (NSString*) descriptionWithLocale: (id _Nullable)locale
 			     indent: (NSUInteger)level;
 
 - (BOOL) writeToFile: (NSString*)path atomically: (BOOL)useAuxiliaryFile;
 #if OS_API_VERSION(GS_API_MACOSX, GS_API_LATEST)
 - (BOOL) writeToURL: (NSURL*)url atomically: (BOOL)useAuxiliaryFile;
 - (id) valueForKey: (NSString*)key;
-- (void) setValue: (id)value forKey: (NSString*)key;
+- (void) setValue: (id _Nullable)value forKey: (NSString*)key;
 #endif
 
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_6, GS_API_LATEST)
@@ -183,7 +189,8 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
  * a pointer to a BOOL indicating whether the enumeration should stop.  Setting
  * this to YES will interrupt the enumeration.
  */
-- (void) enumerateObjectsUsingBlock: (GSEnumeratorBlock)aBlock;
+- (void) enumerateObjectsUsingBlock: (GSEnumeratorBlock)aBlock
+GS_NON_PORTABLE(use fast enumeration instead);
 
 /**
  * Enumerate over the collection using the given block.  The first argument is
@@ -196,7 +203,9 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
  * that it should be enumerated in reverse order.
  */
 - (void) enumerateObjectsWithOptions: (NSEnumerationOptions)opts
-			  usingBlock: (GSEnumeratorBlock)aBlock;
+			  usingBlock: (GSEnumeratorBlock)aBlock
+GS_NON_PORTABLE(use fast enumeration instead);
+
 /**
  * Enumerate over the specified indexes in the collection using the given
  * block.  The first argument is the object and the second is the index in the
@@ -210,7 +219,8 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
  */
 - (void) enumerateObjectsAtIndexes: (NSIndexSet*)indexSet
 			   options: (NSEnumerationOptions)opts
-			usingBlock: (GSEnumeratorBlock)block;
+			usingBlock: (GSEnumeratorBlock)block
+GS_NON_PORTABLE(use fast enumeration instead);
 /**
  * Returns the indexes of the objects in a collection that match the condition
  * specified by the block.
@@ -220,13 +230,15 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
  * that it should be enumerated in reverse order.
  */
 - (NSIndexSet *) indexesOfObjectsWithOptions: (NSEnumerationOptions)opts
-				 passingTest: (GSPredicateBlock)predicate;
+				 passingTest: (GSPredicateBlock)predicate
+GS_NON_PORTABLE(use fast enumeration instead);
 
 /**
  * Returns the indexes of the objects in a collection that match the condition
  * specified by the block.
  */
-- (NSIndexSet*) indexesOfObjectsPassingTest: (GSPredicateBlock)predicate;
+- (NSIndexSet*) indexesOfObjectsPassingTest: (GSPredicateBlock)predicate
+GS_NON_PORTABLE(use fast enumeration instead);
 
 /**
  * Returns the indexes of the objects in a collection that match the condition
@@ -238,7 +250,8 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
  */
 - (NSIndexSet*) indexesOfObjectsAtIndexes: (NSIndexSet*)indexSet
 				  options: (NSEnumerationOptions)opts
-			      passingTest: (GSPredicateBlock)predicate;
+			      passingTest: (GSPredicateBlock)predicate
+GS_NON_PORTABLE(use fast enumeration instead);
 
 /**
  * Returns the index of the first object in the array that matches the
@@ -249,13 +262,15 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
  * that it should be enumerated in reverse order.
  */
 - (NSUInteger) indexOfObjectWithOptions: (NSEnumerationOptions)opts
-			    passingTest: (GSPredicateBlock)predicate;
+			    passingTest: (GSPredicateBlock)predicate
+GS_NON_PORTABLE(use fast enumeration instead);
 
 /**
  * Returns the index of the first object in the array that matches the
  * condition specified by the block.
  */
-- (NSUInteger) indexOfObjectPassingTest: (GSPredicateBlock)predicate;
+- (NSUInteger) indexOfObjectPassingTest: (GSPredicateBlock)predicate
+GS_NON_PORTABLE(use fast enumeration instead);
 
 /**
  * Returns the index of the first object in the specified range in a collection
@@ -267,13 +282,15 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
  */
 - (NSUInteger) indexOfObjectAtIndexes: (NSIndexSet*)indexSet
 			      options: (NSEnumerationOptions)opts
-			  passingTest: (GSPredicateBlock)predicate;
+			  passingTest: (GSPredicateBlock)predicate
+GS_NON_PORTABLE(use fast enumeration instead);
 
 /** Returns a sorted array using the comparator to determine the
  * order of objects.
  */
 - (GS_GENERIC_CLASS(NSArray, ElementT) *) sortedArrayUsingComparator:
-    (NSComparator)comparator;
+    (NSComparator)comparator
+  GS_NON_PORTABLE(sort using a function or selector);
 
 /** Returns a sorted array using the block to determine the order of objects.
  *
@@ -283,7 +300,8 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
  */
 - (GS_GENERIC_CLASS(NSArray, ElementT) *)
     sortedArrayWithOptions: (NSSortOptions)options
-           usingComparator: (NSComparator)comparator;
+           usingComparator: (NSComparator)comparator
+  GS_NON_PORTABLE(sort using a function or selector);
 
 /**
  * Performs a binary search of the array within the specified range for the
@@ -294,7 +312,8 @@ DEFINE_BLOCK_TYPE(GSPredicateBlock, BOOL, GS_GENERIC_TYPE(ElementT), NSUInteger,
 - (NSUInteger) indexOfObject: (id)key
                inSortedRange: (NSRange)range
                      options: (NSBinarySearchingOptions)options
-             usingComparator: (NSComparator)comparator;
+             usingComparator: (NSComparator)comparator
+  GS_NON_PORTABLE(sort using a function or selector);
 #endif
 /**
  * Accessor for subscripting.  This is called by the compiler when you write
@@ -389,7 +408,7 @@ GS_EXPORT_CLASS
 - (void) sortUsingFunction:
     (NSComparisonResult (*)(GS_GENERIC_TYPE(ElementT),
        GS_GENERIC_TYPE(ElementT),void*))compare
-		           context: (void*)context;
+		           context: (void *_Nullable)context;
 - (void) sortUsingSelector: (SEL)comparator;
 
 
@@ -397,13 +416,15 @@ GS_EXPORT_CLASS
 /**
  * Sorts the array using the specified comparator block.
  */
-- (void) sortUsingComparator: (NSComparator)comparator;
+- (void) sortUsingComparator: (NSComparator)comparator
+  GS_NON_PORTABLE(sort using a function or selector);
 
 /**
  * Sorts the array using the specified comparator block and options.
  */
 - (void) sortWithOptions: (NSSortOptions)options
-         usingComparator: (NSComparator)comparator;
+         usingComparator: (NSComparator)comparator
+  GS_NON_PORTABLE(sort using a function or selector);
 #endif
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_8, GS_API_LATEST)
 /** Set method called by the compiler with array subscripting.<br />
@@ -414,6 +435,8 @@ GS_EXPORT_CLASS
 atIndexedSubscript: (NSUInteger)anIndex;
 #endif
 @end
+
+NS_ASSUME_NONNULL_END
 
 #if	defined(__cplusplus)
 }

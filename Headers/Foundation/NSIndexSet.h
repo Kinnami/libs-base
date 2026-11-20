@@ -101,14 +101,72 @@ GS_EXPORT_CLASS
 DEFINE_BLOCK_TYPE(GSIndexSetEnumerationBlock, void, NSUInteger, BOOL*);
 - (void) enumerateIndexesInRange: (NSRange)range
                          options: (NSEnumerationOptions)opts
-		      usingBlock: (GSIndexSetEnumerationBlock)aBlock;
+		      usingBlock: (GSIndexSetEnumerationBlock)aBlock
+GS_NON_PORTABLE(please use portable methods);
 /**
  * Enumerate all indices in the set by applying a block to them.
  */
-- (void) enumerateIndexesUsingBlock: (GSIndexSetEnumerationBlock)aBlock;
+- (void) enumerateIndexesUsingBlock: (GSIndexSetEnumerationBlock)aBlock
+GS_NON_PORTABLE(please use portable methods);
 
 - (void) enumerateIndexesWithOptions: (NSEnumerationOptions)opts
-		          usingBlock: (GSIndexSetEnumerationBlock)aBlock;
+		          usingBlock: (GSIndexSetEnumerationBlock)aBlock
+GS_NON_PORTABLE(please use portable methods);
+
+DEFINE_BLOCK_TYPE(GSIndexSetPredicateBlock, BOOL, NSUInteger, BOOL*);
+
+/**
+ * Returns the first index in the receiver for which the predicate
+ * returns YES, or NSNotFound if there is none.<br />
+ * Setting the BOOL pointed to by the predicate's second argument to YES
+ * stops the search.
+ */
+- (NSUInteger) indexPassingTest: (GSIndexSetPredicateBlock)predicate
+GS_NON_PORTABLE(please use portable methods);
+
+/**
+ * Returns the first index in the receiver for which the predicate
+ * returns YES, or NSNotFound if there is none.<br />
+ * With NSEnumerationReverse the search starts at the last index.
+ * With NSEnumerationConcurrent the predicate may be called concurrently,
+ * and the result is the first (or last) passing index among those tested.
+ */
+- (NSUInteger) indexWithOptions: (NSEnumerationOptions)opts
+                    passingTest: (GSIndexSetPredicateBlock)predicate
+GS_NON_PORTABLE(please use portable methods);
+
+/**
+ * Returns the first index in the receiver that lies within range
+ * and for which the predicate returns YES, or NSNotFound if there is none.
+ */
+- (NSUInteger) indexInRange: (NSRange)range
+                    options: (NSEnumerationOptions)opts
+                passingTest: (GSIndexSetPredicateBlock)predicate
+GS_NON_PORTABLE(please use portable methods);
+
+/**
+ * Returns a set of all indexes in the receiver for which the predicate
+ * returns YES.
+ */
+- (NSIndexSet*) indexesPassingTest: (GSIndexSetPredicateBlock)predicate
+GS_NON_PORTABLE(please use portable methods);
+
+/**
+ * Returns a set of all indexes in the receiver for which the predicate
+ * returns YES, testing them in the order given by opts.
+ */
+- (NSIndexSet*) indexesWithOptions: (NSEnumerationOptions)opts
+                       passingTest: (GSIndexSetPredicateBlock)predicate
+GS_NON_PORTABLE(please use portable methods);
+
+/**
+ * Returns a set of all indexes in the receiver that lie within range
+ * and for which the predicate returns YES.
+ */
+- (NSIndexSet*) indexesInRange: (NSRange)range
+                       options: (NSEnumerationOptions)opts
+                   passingTest: (GSIndexSetPredicateBlock)predicate
+GS_NON_PORTABLE(please use portable methods);
 
 #endif
 
@@ -117,12 +175,15 @@ DEFINE_BLOCK_TYPE(GSIndexSetRangeEnumerationBlock, void, NSRange, BOOL*);
 
 - (void) enumerateRangesInRange: (NSRange)range 
                         options: (NSEnumerationOptions)opts 
-                     usingBlock: (GSIndexSetRangeEnumerationBlock)aBlock;
+                     usingBlock: (GSIndexSetRangeEnumerationBlock)aBlock
+GS_NON_PORTABLE(please use portable methods);
 
-- (void) enumerateRangesUsingBlock: (GSIndexSetRangeEnumerationBlock)aBlock;
+- (void) enumerateRangesUsingBlock: (GSIndexSetRangeEnumerationBlock)aBlock
+GS_NON_PORTABLE(please use portable methods);
 
 - (void) enumerateRangesWithOptions: (NSEnumerationOptions)opts 
-                         usingBlock: (GSIndexSetRangeEnumerationBlock)aBlock;
+                         usingBlock: (GSIndexSetRangeEnumerationBlock)aBlock
+GS_NON_PORTABLE(please use portable methods);
 #endif
 
 /**

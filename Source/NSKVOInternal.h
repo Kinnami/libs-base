@@ -68,11 +68,13 @@
   } while (false)
 
 @class _NSKVOKeypathObserver;
+@class _NSKVOForwardingRelay;
 
 @interface _NSKVOKeyObserver : NSObject
 {
   _NSKVOKeypathObserver	*_keypathObserver;
   _NSKVOKeyObserver     *_restOfKeypathObserver;
+  _NSKVOForwardingRelay *_restOfKeypathRelay;
   NSArray               *_dependentObservers;
   id                     _object;
   NSString              *_key;
@@ -90,6 +92,7 @@
               affectedObservers: (NSArray *)affectedObservers;
 @property (nonatomic, retain) _NSKVOKeypathObserver	*keypathObserver;
 @property (nonatomic, retain) _NSKVOKeyObserver     	*restOfKeypathObserver;
+@property (nonatomic, retain) _NSKVOForwardingRelay 	*restOfKeypathRelay;
 @property (nonatomic, retain) NSArray               	*dependentObservers;
 @property (nonatomic, assign) id                     	object;
 @property (nonatomic, copy) NSString                	*key;
@@ -103,11 +106,14 @@
 {
   id                         	_object;
   id                         	_observer;
+  id                         	_weakObserver;
   NSString                  	*_keypath;
   NSKeyValueObservingOptions	_options;
   void                      	*_context;
   NSMutableDictionary       	*_pendingChange;
   int                        	_changeDepth;
+  int                        	_deliveryCount;
+  gs_mutex_t                 	_changeLock;
 }
 - (instancetype) initWithObject: (id)object
                        observer: (id)observer
@@ -115,12 +121,49 @@
                         options: (NSKeyValueObservingOptions)options
                         context: (void *)context;
 @property (nonatomic, assign) id                         object;
-@property (nonatomic, assign) id                         observer;
+/* Not retained; use -retainedObserver to message it. */
+@property (nonatomic, readonly) id                       observer;
 @property (nonatomic, copy) NSString                    *keypath;
 @property (nonatomic, assign) NSKeyValueObservingOptions options;
 @property (nonatomic, assign) void                      *context;
 
-@property (retain) NSMutableDictionary *pendingChange;
+/* Read and written only with -lockChange held, so the accessors do not need
+ * to synchronize on their own.
+ */
+@property (nonatomic, retain) NSMutableDictionary *pendingChange;
+
+/* Held from a willChange to the matching didChange.  Two key paths reached
+ * through different objects share one key path observer, so the observed
+ * object's own lock does not cover this.
+ */
+- (void) lockChange;
+- (void) unlockChange;
+
+/* Returns the observer retained, or nil once it is being deallocated. */
+- (id) retainedObserver;
+
+/* Bracket the call to the observer, which happens with no lock held.  The
+ * change dictionary is read for the length of that call, so it may not be
+ * cleared and refilled by a willChange until every such call has returned.
+ */
+- (void) beginDelivery;
+- (void) endDelivery;
+- (BOOL) isDelivering;
+@end
+
+/* Observes on behalf of a key path whose intermediate object registers
+ * observations on the objects it holds.
+ */
+@interface _NSKVOForwardingRelay : NSObject
+{
+  id                     _object;
+  NSString              *_keypath;
+  _NSKVOKeypathObserver *_keypathObserver;
+}
+- (instancetype) initWithObject: (id)object
+                        keypath: (NSString *)keypath
+                keypathObserver: (_NSKVOKeypathObserver *)keypathObserver;
+- (void) stop;
 @end
 
 @interface _NSKVOObservationInfo : NSObject
@@ -129,12 +172,34 @@
   NSInteger             _dependencyDepth;
   NSMutableSet          *_existingDependentKeys;
   NSMutableSet          *_dependencyAncestorKeys;
+  NSMutableArray        *_changeSets;
+  NSMutableArray        *_changeKeys;
   gs_mutex_t            _lock;
+  gs_mutex_t            _changeLock;
 }
 - (void) addObserver: (_NSKVOKeyObserver *)observer;
 - (instancetype) init;
 - (BOOL) isEmpty;
 - (NSArray *) observersForKey: (NSString *)key;
+
+/* The key observers a willChange locked, kept until the matching didChange
+ * unlocks exactly those.  Registration may change while a change is in
+ * progress, so the set cannot be worked out a second time.  The change lock is
+ * held across the pair, so only the thread holding it uses this.  Each set
+ * is kept with its key, because the pairs of different keys need not nest.
+ */
+- (void) pushChangeSet: (NSArray *)set forKey: (NSString *)key;
+- (NSArray *) changeSetForKey: (NSString *)key;
+- (void) popChangeSetForKey: (NSString *)key;
+
+/* Held from a willChange to the matching didChange.  The change depth and the
+ * pending change of each key path observer are reachable from both, so a
+ * second thread setting the same object must not run between them.
+ * Recursive: a dependent key notifies while the key it depends on is
+ * notifying, on the same thread.
+ */
+- (void) lockChange;
+- (void) unlockChange;
 @end
 
 // From NSKVOSwizzling

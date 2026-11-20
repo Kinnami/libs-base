@@ -1,6 +1,6 @@
 /** Declaration of extension methods for base additions
 
-   Copyright (C) 2003-2010 Free Software Foundation, Inc.
+   Copyright (C) 2003-2026 Free Software Foundation, Inc.
 
    Written by:  Richard Frith-Macdonald <rfm@gnu.org>
    and:         Adam Fedor <fedor@gnu.org>
@@ -46,6 +46,15 @@ extern "C" {
  */
 + (id) dataWithRandomBytesOfLength: (NSUInteger)length;
 
+/** Populates a buffer with pseudo-random bytes of the specified length.<br />
+ * Returns YES on succes, NO on failure.  Failure may be due to:<br />
+ * A NULL buffer pointer.<br />
+ * A zero length or unreasonably large length argument or,<br />
+ * Failure to allocate memory to hold the random data or,<br />
+ * Failure of the underlying random data generation.
+ */
++ (BOOL) randomBytes: (uint8_t*)buffer ofLength: (NSUInteger)length;
+
 /** Returns an NSString object containing a backslash escaped representation
  * of the receiver.
  */
@@ -57,6 +66,16 @@ extern "C" {
  * the trailing nul terminator).
  */
 - (char*) escapedRepresentation: (NSUInteger*)length;
+
+#if	defined(__APPLE__)
+/** <override-subclass/>
+ * When the receiver is deallocated, the memory will be freed using the user
+ * supplied function.
+ */
+- (instancetype) initWithBytesNoCopy: (void*)buf
+                              length: (NSUInteger)len
+                        freeFunction: (void (*)(void *buf, NSUInteger len))func;
+#endif
 
 /** Returns data formed by gunzipping the contents of the receiver.<br />
  * If the receiver did not contain data produced by gzip, this method

@@ -59,7 +59,11 @@ typedef GSIMapNode_t *GSIMapNode;
   GSIMapNode	freeNodes;	/* List of unused nodes.	*/
   GSIMapNode	*nodeChunks;	/* Chunks of allocated memory.	*/
   size_t	chunkCount;	/* Number of chunks in array.	*/
-  size_t	increment;	/* Amount to grow by.		*/
+  uint32_t	increment;	/* Amount to grow by.		*/
+  uint8_t	smallMap;
+  uint8_t	reserved1;
+  uint8_t	reserved2;
+  uint8_t	reserved3;
   unsigned long	version;	/* For fast enumeration.	*/
   BOOL		legacy;		/* old style callbacks?		*/
   union {
@@ -131,7 +135,7 @@ typedef GSIMapNode_t *GSIMapNode;
     : (__typeof__(*addr))pointerFunctionsRead(&M->cb.pf.v, (void**)addr))
 #define GSI_MAP_ZEROED(M)\
   (M->legacy ? 0\
-    : (IS_WEAK_KEY(M) || IS_WEAK_VALUE(M)) ? YES : NO)
+    : ((IS_WEAK_KEY(M) ? 1 : 0) | (IS_WEAK_VALUE(M) ? 2 : 0)))
 
 #define	GSI_MAP_ENUMERATOR	NSMapEnumerator
 
@@ -582,12 +586,17 @@ NSMapGet(NSMapTable *table, const void *key)
     }
   if (object_getClass(table) == concreteClass)
     {
-      GSIMapNode	n;
+      NSConcreteMapTable	*m = (NSConcreteMapTable*)table;
+      GSIMapNode		n;
 
       n = GSIMapNodeForKey((GSIMapTable)table, (GSIMapKey)key);
-      if (n == 0)
+      if (0 == n)
 	{
 	  return 0;
+	}
+      else if (IS_WEAK_VALUE(m))
+	{
+	  return objc_loadWeak(&n->value.obj);
 	}
       else
 	{
@@ -1191,6 +1200,11 @@ const NSMapTableValueCallBacks NSOwnedPointerMapValueCallBacks =
     }
 }
 
+- (void) compact
+{
+  GSIMapRemoveWeak(self);
+}
+
 - (id) copyWithZone: (NSZone*)aZone
 {
   return NSCopyMapTableWithZone(self, aZone);
@@ -1443,7 +1457,7 @@ const NSMapTableValueCallBacks NSOwnedPointerMapValueCallBacks =
     {
       return nil;
     }
-  return node->key.obj;
+  return GSI_MAP_READ_KEY(table, &node->key).obj;
 }
 
 - (void) dealloc
@@ -1465,7 +1479,7 @@ const NSMapTableValueCallBacks NSOwnedPointerMapValueCallBacks =
     {
       return nil;
     }
-  return node->value.obj;
+  return GSI_MAP_READ_VALUE(table, &node->value).obj;
 }
 
 @end

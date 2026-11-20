@@ -33,9 +33,11 @@
 #if !(defined(NeXT_RUNTIME) || defined(Apple_RUNTIME))
 #import	<GNUstepBase/GSBlocks.h>
 #endif
+#import	<GNUstepBase/GSBoxWeak.h>
 #import	<GNUstepBase/GSFunctions.h>
 #import	<GNUstepBase/GSLocale.h>
 #import	<GNUstepBase/GSMime.h>
+#import	<GNUstepBase/GSOperation.h>
 #import	<GNUstepBase/GSXML.h>
 #import	<GNUstepBase/Unicode.h>
 
@@ -46,11 +48,14 @@
 #import	<GNUstepBase/NSData+GNUstepBase.h>
 #import	<GNUstepBase/NSDebug+GNUstepBase.h>
 #import	<GNUstepBase/NSFileHandle+GNUstepBase.h>
+#import	<GNUstepBase/NSHashTable+GNUstepBase.h>
+#import	<GNUstepBase/NSHost+GNUstepBase.h>
 #import	<GNUstepBase/NSMutableString+GNUstepBase.h>
 #import	<GNUstepBase/NSNetServices+GNUstepBase.h>
 #import	<GNUstepBase/NSNumber+GNUstepBase.h>
 #import	<GNUstepBase/NSObject+GNUstepBase.h>
 #import	<GNUstepBase/NSProcessInfo+GNUstepBase.h>
+#import	<GNUstepBase/NSProgress+GNUstepBase.h>
 #import	<GNUstepBase/NSStream+GNUstepBase.h>
 #import	<GNUstepBase/NSString+GNUstepBase.h>
 #import	<GNUstepBase/NSTask+GNUstepBase.h>

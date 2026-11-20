@@ -28,6 +28,7 @@
 #import "Foundation/NSURLError.h"
 #import "Foundation/NSRunLoop.h"
 #import "GSURLPrivate.h"
+#import "GSRunLoopScheduler.h"
 
 @interface _NSURLConnectionDataCollector : NSObject
 {
@@ -36,6 +37,7 @@
   NSError		*_error;
   NSURLResponse		*_response;
   BOOL			_done;
+  uint8_t		_redirects;
 }
 
 - (NSData*) data;
@@ -115,12 +117,33 @@
   [_data appendData: data];
 }
 
+- (NSURLRequest*)connection: (NSURLConnection*)connection
+            willSendRequest: (NSURLRequest*)request
+           redirectResponse: (NSURLResponse*)response
+{
+  if (response)
+    {
+      _redirects++;
+      if (_redirects > 16)
+	{
+	  if (nil == _error)
+	    {
+	      _error = RETAIN([NSError errorWithDomain: NSURLErrorDomain
+		code: NSURLErrorHTTPTooManyRedirects userInfo: nil]);
+	    }
+	  return nil;
+	}
+    }
+  return request;
+}
+
 @end
 
 typedef struct
 {
   NSMutableURLRequest		*_request;
   NSURLProtocol			*_protocol;
+  GSRunLoopScheduler		*_scheduler;
   id				_delegate;
   BOOL				_debug;
 } Internal;
@@ -176,20 +199,17 @@ typedef struct
 - (void) scheduleInRunLoop: (NSRunLoop *)aRunLoop 
                    forMode: (NSRunLoopMode)mode
 {
-  NSArray *modes = [NSArray arrayWithObject: mode];
-  [aRunLoop performSelector: @selector(start)
-                     target: self
-                   argument: nil
-                      order: 0
-                      modes: modes];
+  if (nil == this->_scheduler)
+    {
+      this->_scheduler = [GSRunLoopScheduler new];
+    }
+  [this->_scheduler scheduleInRunLoop: aRunLoop forMode: mode];
 }
 
 - (void) unscheduleFromRunLoop: (NSRunLoop *)aRunLoop 
                        forMode: (NSRunLoopMode)mode
 {
-  [aRunLoop cancelPerformSelector: @selector(start)
-                           target: self
-                         argument: nil];
+  [this->_scheduler unscheduleFromRunLoop: aRunLoop forMode: mode];
 }
 
 - (void) dealloc
@@ -199,6 +219,7 @@ typedef struct
       [self cancel];
       DESTROY(this->_request);
       DESTROY(this->_delegate);
+      DESTROY(this->_scheduler);
       NSZoneFree([self zone], this);
       _NSURLConnectionInternal = 0;
     }
@@ -272,6 +293,13 @@ typedef struct
               startImmediately: YES];
 }
 
+@end
+
+@implementation	NSURLConnection (NSURLProtocolClient)
+- (GSRunLoopScheduler*) _scheduled
+{
+  return this->_scheduler;
+}
 @end
 
 

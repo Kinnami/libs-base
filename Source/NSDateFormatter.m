@@ -222,6 +222,25 @@ static NSDateFormatterBehavior _defaultBehavior = 0;
 {
   NSCalendarDate	*d;
 
+  if (internal->_behavior == NSDateFormatterBehavior10_4)
+    {
+      NSDate	*parsed = [self dateFromString: string];
+
+      if (parsed == nil && [string length] > 0)
+	{
+	  if (error)
+	    {
+	      *error = @"Couldn't convert to date";
+	    }
+	  return NO;
+	}
+      if (anObject)
+	{
+	  *anObject = parsed;
+	}
+      return YES;
+    }
+
   if ([string length] == 0)
     {
       d = nil;
@@ -254,10 +273,11 @@ static NSDateFormatterBehavior _defaultBehavior = 0;
 
 - (id) initWithCoder: (NSCoder*)aCoder
 {
-  GS_CREATE_INTERNAL(NSDateFormatter)
+  NSString	*fmt;
+  BOOL		nl;
 
-  [aCoder decodeValuesOfObjCTypes: "@C", &_dateFormat, &_allowsNaturalLanguage];
-  return self;
+  [aCoder decodeValuesOfObjCTypes: "@C", &fmt, &nl];
+  return [self initWithDateFormat: AUTORELEASE(fmt) allowNaturalLanguage: nl];
 }
 
 - (id) initWithDateFormat: (NSString*)format
@@ -294,9 +314,7 @@ static NSDateFormatterBehavior _defaultBehavior = 0;
     {
       return nil;
     }
-  return [anObject descriptionWithCalendarFormat: _dateFormat
-					timeZone: [NSTimeZone defaultTimeZone]
-					  locale: nil];
+  return [self stringFromDate: (NSDate*)anObject];
 }
 
 
@@ -379,14 +397,15 @@ static NSDateFormatterBehavior _defaultBehavior = 0;
 #endif
 }
 
-- (NSString*) stringFromDate: (NSDate*) date
+- (NSString*) stringFromDate: (NSDate*)date
 {
+  NSString	*result = nil;
+
 #if GS_USE_ICU == 1
-  NSString *result;
-  int32_t length;
-  unichar *string;
-  UDate udate = [date timeIntervalSince1970] * 1000.0;
-  UErrorCode err = U_ZERO_ERROR;
+  int32_t	length;
+  unichar	*string;
+  UDate		udate = [date timeIntervalSince1970] * 1000.0;
+  UErrorCode	err = U_ZERO_ERROR;
   
   length = udat_format (internal->_formatter, udate, NULL, 0, NULL, &err);
   string = malloc(sizeof(UChar) * (length + 1));
@@ -399,14 +418,23 @@ static NSDateFormatterBehavior _defaultBehavior = 0;
         length: length * sizeof(UChar)
         encoding: NSUnicodeStringEncoding
         freeWhenDone: YES]);
-      return result;
     }
-  
-  free(string);
-  return nil;
-#else
-  return nil;
+  else
+    {
+      result = nil;
+      free(string);
+    }
 #endif
+  if (nil == result)
+    {
+      /* Fallback for backward compatibility in -stringForObjectValue:
+       * use old style format if we don't have ICU or if ICU fails.
+       */
+      result = [date descriptionWithCalendarFormat: _dateFormat
+					  timeZone: [NSTimeZone defaultTimeZone]
+					    locale: nil];
+    }
+  return result;
 }
 
 - (BOOL) getObjectValue: (out id*) obj

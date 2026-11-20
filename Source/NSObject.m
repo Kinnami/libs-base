@@ -140,6 +140,8 @@ static IMP autorelease_imp;
 
 static SEL finalize_sel;
 static IMP finalize_imp;
+
+typedef void (*GSVoidMethodIMP)(id, SEL);
 static Class	NSConstantStringClass;
 
 @class	NSDataMalloc;
@@ -246,6 +248,14 @@ typedef intptr_t gsrefcount_t;
 #define GSATOMICREAD(X) (*(X))
 #define GSAtomicIncrement(X)    __sync_add_and_fetch(X, 1)
 #define GSAtomicDecrement(X)    __sync_sub_and_fetch(X, 1)
+
+#elif defined(HAVE_GCC_ATOMIC_BUILTINS)
+
+typedef int32_t volatile *gsatomic_t;
+typedef int32_t gsrefcount_t;
+#define GSATOMICREAD(X) (*(X))
+#define GSAtomicIncrement(X)    __atomic_add_fetch(X, 1, __ATOMIC_SEQ_CST)
+#define GSAtomicDecrement(X)    __atomic_sub_fetch(X, 1, __ATOMIC_SEQ_CST)
 
 #elif (defined(USE_ATOMIC_BUILTINS) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 1)))
 /* Use the GCC atomic operations with recent GCC versions */
@@ -458,6 +468,7 @@ static inline pthread_mutex_t   *GSAllocationLockForObject(id p)
 typedef struct {
   BOOL	hadWeakReference: 1;	// if the instance ever had a weak reference
   BOOL	hadAssociations: 1;	// if the instance ever had associated objects
+  BOOL	hadInit: 1;		// if the root -init method has been called
 } gsinstinfo_t;
 #endif
 
@@ -800,7 +811,7 @@ callCXXConstructors(Class aClass, id anObject)
       constructor = class_getMethodImplementation(aClass, cxx_construct);
       if (calledConstructor != constructor)
         {
-          constructor(anObject, cxx_construct);
+          ((GSVoidMethodIMP)constructor)(anObject, cxx_construct);
         }
     }
   return constructor;
@@ -833,8 +844,12 @@ NSAllocateObject(Class aClass, NSUInteger extraBytes, NSZone *zone)
   new = NSZoneMalloc(zone, size);
   if (new != nil)
     {
-      memset (new, 0, size);
+      memset(new, 0, size);
       new = (id)&((obj)new)[1];
+      /* Set the initial value of the memory to NULL to avoid object_setClass()
+       * being confused.
+       */
+      *(void**)new = NULL;
       object_setClass(new, aClass);
     }
 
@@ -869,7 +884,7 @@ NSDeallocateObject(id anObject)
 
       /* Call the default finalizer to handle C++ destructors.
        */
-      (*finalize_imp)(anObject, finalize_sel);
+      ((GSVoidMethodIMP)finalize_imp)(anObject, finalize_sel);
 
 #ifndef OBJC_CAP_ARC
       if (GSPrivateMarkedAssociations(anObject, NO))
@@ -1063,7 +1078,11 @@ static id gs_weak_load(id obj)
       }
 #else /* HAVE_SIGACTION */
       {
+#if defined(__EMSCRIPTEN__)
+	void	(*handler)(int);
+#else
 	void	(*handler)(NSInteger);
+#endif
 
 	handler = signal(SIGPIPE, SIG_IGN);
 	if (handler != SIG_DFL)
@@ -1409,7 +1428,17 @@ static id gs_weak_load(id obj)
  */
 - (void) dealloc
 {
+#ifndef OBJC_CAP_ARC
+  /* We only count the deallocation of the instance if we first counted its
+   * allocation/initialisation in the -init method.
+   */
+  if (((obj)self)[-1].extra.hadInit)
+    {
+      GSDebugAllocationRemove(object_getClass(self), self);
+    }
+#else
   GSDebugAllocationRemove(object_getClass(self), self);
+#endif
   NSDeallocateObject(self);
 }
 
@@ -1494,7 +1523,23 @@ static id gs_weak_load(id obj)
  */
 - (id) init
 {
+#ifdef OBJC_CAP_ARC
   GSDebugAllocationAdd(object_getClass(self), self);
+#else
+  if (((obj)self)[-1].extra.hadInit)
+    {
+      NSLog(@"Warning: called -init more than once for %p (instance of %s)",
+	self, class_getName(object_getClass(self)));
+    }
+  else
+    {
+      /* Record that the -init method has been called and count the instance
+       * as having been allocated (for memory usage tracking).
+       */
+      ((obj)self)[-1].extra.hadInit = YES;
+      GSDebugAllocationAdd(object_getClass(self), self);
+    }
+#endif
   return self;
 }
 
@@ -1894,7 +1939,8 @@ static id gs_weak_load(id obj)
 	  release_count, retain_count];
     }
 
-  (*autorelease_imp)(autorelease_class, autorelease_sel, self);
+  ((void (*)(id, SEL, id))autorelease_imp)
+    (autorelease_class, autorelease_sel, self);
   return self;
 }
 

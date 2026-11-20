@@ -38,6 +38,7 @@
 #import "Foundation/NSDate.h"
 #import "Foundation/NSDictionary.h"
 #import "Foundation/NSDistributedLock.h"
+#import "Foundation/NSDistributedNotificationCenter.h"
 #import "Foundation/NSException.h"
 #import "Foundation/NSFileManager.h"
 #import "Foundation/NSLock.h"
@@ -72,6 +73,10 @@
 #endif
 
 #import "GSPrivate.h"
+
+@interface NSDistributedNotificationCenter (Private)
++ (NSDistributedNotificationCenter*) _defaultCenterIfExists;
+@end
 
 /* Wait for access */
 #define _MAX_COUNT 5          /* Max 10 sec. */
@@ -783,12 +788,10 @@ newLanguages(NSArray *oldNames)
            */
           [[NSNotificationCenter defaultCenter] removeObserver: sharedDefaults];
 
-          /* Ensure changes are written, and no changes left so we can't end up
-           * writing old changes to the new defaults.
+          /* Ensure changes are written, and no changes left.
            */
           [sharedDefaults synchronize];
-          DESTROY(sharedDefaults->_changedDomains);
-          DESTROY(sharedDefaults);
+	  DESTROY(sharedDefaults);
 	}
       hasSharedDefaults = NO;
       [classLock unlock];
@@ -1231,6 +1234,14 @@ newLanguages(NSArray *oldNames)
   RELEASE(dict);
 }
 
+/* Refresh form database when persistent defaults not owned by the
+ * current process have changed.
+ */
+- (void) _distributedDefaultsChanged: (NSNotification*)n
+{
+  [self synchronize];
+}
+
 - (id) init
 {
   return [self initWithUser: NSUserName()];
@@ -1366,8 +1377,22 @@ newLanguages(NSArray *oldNames)
   return desc;
 }
 
+- (void) _didChange
+{
+  if (nil == _changedDomains)
+    {
+      [_lock lock];
+      if (nil == _changedDomains)
+	{
+	  _changedDomains = [[NSMutableArray alloc] initWithCapacity: 4];
+	}
+      [_lock unlock];
+    }
+}
+
 - (void) addSuiteNamed: (NSString*)aName
 {
+  BOOL		haveChange = NO;
   NSUInteger	index;
 
   if (aName == nil)
@@ -1387,6 +1412,7 @@ newLanguages(NSArray *oldNames)
       // Ensure that any persistent domain with the specified name is loaded.
       [self persistentDomainForName: aName];
       updateCache(self);
+      haveChange = YES;
       [_lock unlock];
     }
   NS_HANDLER
@@ -1396,6 +1422,10 @@ newLanguages(NSArray *oldNames)
     }
   NS_ENDHANDLER
   RELEASE(aName);
+  if (haveChange)
+    {
+      [self _didChange];
+    }
 }
 
 - (NSArray*) arrayForKey: (NSString*)defaultName
@@ -1519,6 +1549,10 @@ newLanguages(NSArray *oldNames)
 
 - (void) removeObjectForKey: (NSString*)defaultName
 {
+  BOOL	changed = NO;
+  id	old = nil;
+  id	new = nil;
+
   [_lock lock];
   NS_DURING
     {
@@ -1527,34 +1561,24 @@ newLanguages(NSArray *oldNames)
       pd = [_persDomains objectForKey: bundleIdentifier];
       if (nil != pd)
 	{
-	  id	old = [self objectForKey: defaultName];
+	  old = [self objectForKey: defaultName];
 
 	  if ([pd setObject: nil forKey: defaultName])
 	    {
-	      id 	new;
-
 	      [self _changePersistentDomain: bundleIdentifier];
 	      new = [self objectForKey: defaultName];
 	      /* Emit only a KVO notification when the value has actually
 	       * changed, meaning -objectForKey: would return a different
 	       * value than before.
 	       */
-	      if (![new isEqual: old])
-		{
-		  [self _notifyObserversOfChangeForKey: defaultName
-					      oldValue: old
-					      newValue: new];
-		}
+	      changed = ![new isEqual: old];
 	    }
 	  else
 	    {
 	      /* We always notify observers of a change, even if the value
 	       * itself is unchanged.
 	       */
-	      [[NSNotificationCenter defaultCenter]
-		postNotificationName: NSUserDefaultsDidChangeNotification
-		  object: self];
-
+	      [self _didChange];
 	    }
 	}
       [_lock unlock];
@@ -1565,6 +1589,16 @@ newLanguages(NSArray *oldNames)
       [localException raise];
     }
   NS_ENDHANDLER
+  /* Observers are called without the lock held, so that one which takes
+   * another lock cannot deadlock with a thread holding that lock and waiting
+   * for the defaults.
+   */
+  if (changed)
+    {
+      [self _notifyObserversOfChangeForKey: defaultName
+				  oldValue: old
+				  newValue: new];
+    }
 }
 
 - (void) setBool: (BOOL)value forKey: (NSString*)defaultName
@@ -1651,6 +1685,10 @@ static BOOL isPlistObject(id o)
 
 - (void) setObject: (id)value forKey: (NSString*)defaultName
 {
+  BOOL	changed = NO;
+  id	old = nil;
+  id	new = nil;
+
   if (nil == value)
     {
       [self removeObjectForKey: defaultName];
@@ -1674,7 +1712,6 @@ static BOOL isPlistObject(id o)
   NS_DURING
     {
       GSPersistentDomain	*pd;
-      id old;
 
       pd = [_persDomains objectForKey: bundleIdentifier];
       if (nil == pd)
@@ -1688,31 +1725,22 @@ static BOOL isPlistObject(id o)
       old = [self objectForKey: defaultName];
       if ([pd setObject: value forKey: defaultName])
         {
-          id new;
-          
           /* New value must be fetched from all domains, as there might be
            * a registered default if value is nil, or the value is
            * superseded by GSPrimary or NSArgumentDomain
 	   */
           new = [self objectForKey: defaultName];
           [self _changePersistentDomain: bundleIdentifier];
-	  
+
 	  // Emit only a KVO notification when the value has actually changed
-	  if (![new isEqual: old])
-	    {
-              [self _notifyObserversOfChangeForKey: defaultName
-					  oldValue: old
-					  newValue: new];
-	    }
+	  changed = ![new isEqual: old];
         }
       else
         {
           /* We always notify observers of a change, even if the value
            * itself is unchanged.
 	   */
-          [[NSNotificationCenter defaultCenter]
-            postNotificationName: NSUserDefaultsDidChangeNotification
-			  object: self];
+	  [self _didChange];
         }
       [_lock unlock];
     }
@@ -1723,6 +1751,12 @@ static BOOL isPlistObject(id o)
     }
   NS_ENDHANDLER
   RELEASE(value);
+  if (changed)
+    {
+      [self _notifyObserversOfChangeForKey: defaultName
+				  oldValue: old
+				  newValue: new];
+    }
 }
 
 - (void) setValue: (id)value forKey: (NSString*)defaultName
@@ -1781,6 +1815,8 @@ static BOOL isPlistObject(id o)
 
 - (void) setSearchList: (NSArray*)newList
 {
+  BOOL	haveChange = NO;
+
   [_lock lock];
   NS_DURING
     {
@@ -1800,6 +1836,7 @@ static BOOL isPlistObject(id o)
               [self persistentDomainForName:  n];
             }
           updateCache(self);
+          haveChange = YES;
         }
       [_lock unlock];
     }
@@ -1809,6 +1846,10 @@ static BOOL isPlistObject(id o)
       [localException raise];
     }
   NS_ENDHANDLER
+  if (haveChange)
+    {
+      [self _didChange];
+    }
 }
 
 - (NSDictionary*) persistentDomainForName: (NSString*)domainName
@@ -1967,22 +2008,30 @@ static BOOL isPlistObject(id o)
   BOOL			wasLocked = NO;
   BOOL			result = YES;
   BOOL			haveChange = NO;
+  BOOL			distributed = NO;
 
   [_lock lock];
   saved = _lastSync;
   _lastSync = [NSDate new];	// Record timestamp of this sync.
   NS_DURING
     {
+      /* When _changedDomains is not nil there has been some change which
+       * needs at least a notification to be sent.
+       */
+      if (_changedDomains)
+	{
+	  haveChange = YES;
+	}
       /* If we haven't changed anything, we only need to synchronise if
        * the on-disk database has been changed by someone else.
        */
-      if (_changedDomains != nil
+      if ([_changedDomains count]
         || YES == [self wantToReadDefaultsSince: saved])
 	{
           /* If we want to write but are currently read-only, try to
 	   * create the path to make things writable.
 	   */
-	  if (_changedDomains != nil && YES == [self _readOnly])
+	  if ([_changedDomains count] && YES == [self _readOnly])
 	    {
 	      NSString	*path = lockPath(_defaultsDatabase, NO);
 
@@ -2024,7 +2073,13 @@ static BOOL isPlistObject(id o)
                           domain = [_persDomains objectForKey: domainName];
                           if (domain != nil)	// Domain was added or changed
                             {
-                              [domain synchronize];
+                              if ([domain synchronize])
+				{
+				  if (![domainName isEqual: bundleIdentifier])
+				    {
+				      distributed = YES;
+				    }
+				}
                             }
                           else			// Domain was removed
                             {
@@ -2033,7 +2088,14 @@ static BOOL isPlistObject(id o)
                               path = [[_defaultsDatabase
                                 stringByAppendingPathComponent: domainName]
                                 stringByAppendingPathExtension: @"plist"];
-                              [mgr removeFileAtPath: path handler: nil];
+			      if ([mgr fileExistsAtPath: path])
+				{
+				  [mgr removeFileAtPath: path handler: nil];
+				  if (![domainName isEqual: bundleIdentifier])
+				    {
+				      distributed = YES;
+				    }
+				}
                             }
                         }
                     }
@@ -2050,6 +2112,7 @@ static BOOL isPlistObject(id o)
 		}
 	    }
 	}
+      DESTROY(_changedDomains);
     }
   NS_HANDLER
     {
@@ -2102,12 +2165,24 @@ static BOOL isPlistObject(id o)
 	postNotificationName: NSUserDefaultsDidChangeNotification
 		      object: self];
     }
+  if (distributed)
+    {
+      /* Let other applications know that a persistent domain (other than
+       * the one owned by the current application) has been updated, so
+       * can synchronise with the changes.
+       */
+      [[NSDistributedNotificationCenter _defaultCenterIfExists]
+	postNotificationName: NSUserDefaultsDidChangeNotification
+                      object: @"DistributedDefaults"];
+    }
   return result;
 }
 
 
 - (void) removeVolatileDomainForName: (NSString*)domainName
 {
+  BOOL	haveChange = NO;
+
   [_lock lock];
   NS_DURING
     {
@@ -2117,6 +2192,7 @@ static BOOL isPlistObject(id o)
         {
           updateCache(self);
         }
+      haveChange = YES;
       [_lock unlock];
     }
   NS_HANDLER
@@ -2125,11 +2201,16 @@ static BOOL isPlistObject(id o)
       [localException raise];
     }
   NS_ENDHANDLER
+  if (haveChange)
+    {
+      [self _didChange];
+    }
 }
 
 - (void) setVolatileDomain: (NSDictionary*)domain
 		   forName: (NSString*)domainName
 {
+  BOOL	haveChange = NO;
   id	dict;
 
   [_lock lock];
@@ -2141,13 +2222,6 @@ static BOOL isPlistObject(id o)
           [NSException raise: NSInvalidArgumentException
 	    format: @"a persistent domain called %@ exists", domainName];
         }
-      dict = [_tempDomains objectForKey: domainName];
-      if (dict != nil)
-        {
-          [NSException raise: NSInvalidArgumentException
-	    format: @"the volatile domain %@ already exists", domainName];
-        }
-
       DESTROY(_dictionaryRep);
       domain = [domain mutableCopy];
       [_tempDomains setObject: domain forKey: domainName];
@@ -2156,6 +2230,7 @@ static BOOL isPlistObject(id o)
         {
           updateCache(self);
         }
+      haveChange = YES;
       [_lock unlock];
     }
   NS_HANDLER
@@ -2164,6 +2239,10 @@ static BOOL isPlistObject(id o)
       [localException raise];
     }
   NS_ENDHANDLER
+  if (haveChange)
+    {
+      [self _didChange];
+    }
 }
 
 - (NSDictionary*) volatileDomainForName: (NSString*)domainName
@@ -2229,7 +2308,7 @@ static BOOL isPlistObject(id o)
           nImp = [enumerator methodForSelector: nextObjectSel];
 
           dictRep = [NSMutableDictionaryClass alloc];
-          dictRep = [dictRep initWithCapacity: 512];
+          dictRep = AUTORELEASE([dictRep initWithCapacity: 512]);
           addImp = [dictRep methodForSelector: addSel];
 
           while ((obj = (*nImp)(enumerator, nextObjectSel)) != nil)
@@ -2250,7 +2329,7 @@ static BOOL isPlistObject(id o)
                   (*addImp)(dictRep, addSel, dict);
                 }
 	    }
-          _dictionaryRep = GS_IMMUTABLE(dictRep);
+          ASSIGN(_dictionaryRep, GS_IMMUTABLE(dictRep));
         }
       rep = AUTORELEASE(RETAIN(_dictionaryRep));
       [_lock unlock];
@@ -2267,6 +2346,7 @@ static BOOL isPlistObject(id o)
 
 - (void) registerDefaults: (NSDictionary*)newVals
 {
+  BOOL			haveChange = NO;
   NSMutableDictionary	*regDefs;
 
   [_lock lock];
@@ -2282,6 +2362,7 @@ static BOOL isPlistObject(id o)
       DESTROY(_dictionaryRep);
       [regDefs addEntriesFromDictionary: newVals];
       updateCache(self);
+      haveChange = YES;
       [_lock unlock];
     }
   NS_HANDLER
@@ -2290,10 +2371,16 @@ static BOOL isPlistObject(id o)
       [localException raise];
     }
   NS_ENDHANDLER
+  if (haveChange)
+    {
+      [self _didChange];
+    }
 }
 
 - (void) removeSuiteNamed: (NSString*)aName
 {
+  BOOL	haveChange = NO;
+
   if (aName == nil)
     {
       [NSException raise: NSInvalidArgumentException
@@ -2305,6 +2392,7 @@ static BOOL isPlistObject(id o)
       DESTROY(_dictionaryRep);
       [_searchList removeObject: aName];
       updateCache(self);
+      haveChange = YES;
       [_lock unlock];
     }
   NS_HANDLER
@@ -2313,6 +2401,10 @@ static BOOL isPlistObject(id o)
       [localException raise];
     }
   NS_ENDHANDLER
+  if (haveChange)
+    {
+      [self _didChange];
+    }
 }
 
 - (BOOL) writeDictionary: (NSDictionary*)dict
@@ -2561,9 +2653,7 @@ NSDictionary *GSPrivateDefaultLocale()
   NS_ENDHANDLER
   if (haveChange)
     {
-      [[NSNotificationCenter defaultCenter]
-	postNotificationName: NSUserDefaultsDidChangeNotification
-		      object: self];
+      [self _didChange];
     }
 }
 

@@ -31,6 +31,27 @@
 #import "GSInternal.h"
 GS_PRIVATE_INTERNAL(NSXMLElement)
 
+/* The placeholder for prefix declared at node or an ancestor: a namespace
+ * with that prefix and no href, which xmlSearchNs() passes over.
+ */
+static xmlNsPtr
+searchPlaceholderNs(xmlNodePtr node, const xmlChar *prefix)
+{
+  for (; node != NULL && node->type == XML_ELEMENT_NODE; node = node->parent)
+    {
+      xmlNsPtr	cur;
+
+      for (cur = node->nsDef; cur != NULL; cur = cur->next)
+	{
+	  if (NULL == cur->href && xmlStrEqual(cur->prefix, prefix))
+	    {
+	      return cur;
+	    }
+	}
+    }
+  return NULL;
+}
+
 @implementation NSXMLElement
 
 - (void) dealloc
@@ -52,7 +73,7 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
       */
     }
 
-  [super dealloc];
+  DEALLOC
 }
 
 - (void) _createInternal
@@ -73,9 +94,10 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
     }
   else
     {
-      [self release];
-      // This cast is here to keep clang quite that expects an init* method to 
-      // return an object of the same class, which is not true here.
+      RELEASE(self);
+      /* This cast is here to keep clang quite that expects an init* method to 
+       * return an object of the same class, which is not true here.
+       */
       return (NSXMLElement*)[[NSXMLNode alloc] initWithKind: theKind
                                                     options: theOptions];
     }
@@ -109,7 +131,7 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
       t = [[NSXMLNode alloc] initWithKind: NSXMLTextKind];
       [t setStringValue: string];
       [self addChild: t];
-      [t release];
+      RELEASE(t);
     }
   return self;
 }
@@ -117,20 +139,20 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
 - (id) initWithXMLString: (NSString*)string 
 		   error: (NSError**)error
 {
-  NSXMLElement *result = nil;
-  NSXMLDocument *tempDoc = 
-    [[NSXMLDocument alloc] initWithXMLString: string
-                                     options: 0
-                                       error: error];
-  if (tempDoc != nil)
-    {
-      result = RETAIN([tempDoc rootElement]);
-      [result detach]; // detach from document.
-    }
-  [tempDoc release];
-  [self release];
+  NSXMLDocument	*tempDoc;
 
-  return result;
+  tempDoc = [[NSXMLDocument alloc] initWithXMLString: string
+					     options: 0
+					       error: error];
+  if (tempDoc)
+    {
+      RELEASE(self);
+      self = RETAIN([tempDoc rootElement]);
+      [self detach]; // detach from document.
+      RELEASE(tempDoc);
+    }
+
+  return self;
 }
 
 - (id) objectValue
@@ -164,12 +186,15 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
       xmlNodePtr cur = NULL;
       const xmlChar *xmlName = XMLSTRING(name);
       xmlNsPtr defaultNS = NULL;
-
-      // Find the default namespace (empty or NULL prefix) of this parent element
       xmlNsPtr ns;
+
+      /* Find the default namespace (empty or NULL prefix)
+       * of this parent element
+       */
       for (ns = internal->node.node->nsDef; ns != NULL; ns = ns->next)
         {
-          if (ns->prefix == NULL || xmlStrcmp(ns->prefix, (const xmlChar*)"") == 0)
+          if (ns->prefix == NULL
+	    || xmlStrcmp(ns->prefix, (const xmlChar*)"") == 0)
             {
               defaultNS = ns;
               break;
@@ -189,8 +214,8 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
                       [results addObject: theNode];
                     }
                   // Match elements in the default namespace if one exists
-                  else if (defaultNS != NULL && cur->ns->href != NULL &&
-                           xmlStrcmp(cur->ns->href, defaultNS->href) == 0)
+                  else if (defaultNS != NULL && cur->ns->href != NULL
+		    && xmlStrcmp(cur->ns->href, defaultNS->href) == 0)
                     {
                       NSXMLNode *theNode = [NSXMLNode _objectForNode: cur];
                       [results addObject: theNode];
@@ -206,11 +231,13 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
 - (NSArray*) elementsForLocalName: (NSString*)localName URI: (NSString*)URI
 {
   NSMutableArray *results = [NSMutableArray arrayWithCapacity: 10];
-  xmlNodePtr cur = NULL;
+  xmlNodePtr	cur = NULL;
   const xmlChar *href = XMLSTRING(URI);
   const xmlChar *xmlName = XMLSTRING(localName);
-  xmlNsPtr parentNS = xmlSearchNsByHref(internal->node.node->doc, internal->node.node, href);
+  xmlNsPtr	parentNS;
 
+  parentNS = xmlSearchNsByHref(
+    internal->node.node->doc, internal->node.node, href);
   for (cur = internal->node.node->children; cur != NULL; cur = cur->next)
     {
       if (cur->type == XML_ELEMENT_NODE)
@@ -221,15 +248,17 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
 
               if (cur->nsDef != NULL)
                 {
-                  childNS = xmlSearchNsByHref(internal->node.node->doc, cur, href);
+                  childNS = xmlSearchNsByHref(
+		    internal->node.node->doc, cur, href);
                 }
 
               
-              if (((childNS != NULL) && 
-                   ((cur->ns == childNS) ||
-                    ((cur->ns == NULL) &&
-                     (xmlStrcmp(childNS->prefix, (const xmlChar*)"") == 0)))) ||
-                  ((cur->ns != NULL) && (xmlStrcmp(cur->ns->href, href) == 0)))
+              if (((childNS != NULL)
+		&& ((cur->ns == childNS)
+		  || ((cur->ns == NULL)
+		    && (childNS->prefix == NULL
+                      || xmlStrcmp(childNS->prefix, (const xmlChar*)"") == 0))))
+		|| ((cur->ns != NULL) && (xmlStrcmp(cur->ns->href, href) == 0)))
                 {
                   NSXMLNode *theNode = [NSXMLNode _objectForNode: cur];
                   [results addObject: theNode];
@@ -243,9 +272,10 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
 
 - (void) addAttribute: (NSXMLNode*)attribute
 {
-  xmlNodePtr theNode = internal->node.node;
-  xmlAttrPtr attr = (xmlAttrPtr)[attribute _node];
-  xmlAttrPtr oldAttr;
+  xmlNodePtr	theNode = internal->node.node;
+  xmlAttrPtr	attr = (xmlAttrPtr)[attribute _node];
+  xmlAttrPtr	oldAttr;
+  NSString	*aName;
 
   if (nil != [attribute parent])
     {
@@ -253,16 +283,32 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
 		  format: @"Tried to add attribute to multiple parents."];
     }
 
+  aName = [attribute name];
+
+  if ([aName hasPrefix: @"xmlns:"] && [aName length] > 6)
+    {
+      NSXMLNode *ns;
+
+      ns = [NSXMLNode namespaceWithName: [aName substringFromIndex: 6]
+			    stringValue: [attribute stringValue]];
+      [self addNamespace: ns];
+      return;
+    }
+
   if (attr->ns != NULL)
     {
-      xmlNsPtr ns = attr->ns;
-      xmlDocPtr tmp = attr->doc;
-      BOOL resolved = NO;
+      xmlNsPtr	ns = attr->ns;
+      xmlDocPtr	tmp = attr->doc;
+      BOOL 	resolved = NO;
     
       if (ns->href == NULL)
         {
           xmlNsPtr newNs = xmlSearchNs(theNode->doc, theNode, ns->prefix);
           
+          if (NULL == newNs)
+            {
+              newNs = searchPlaceholderNs(theNode, ns->prefix);
+            }
           if (newNs != NULL)
             {
               ns = newNs;
@@ -324,11 +370,32 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
         }
 
 #if LIBXML_VERSION >= 20620
-      xmlDOMWrapAdoptNode(NULL, attr->doc, (xmlNodePtr)attr, 
-                          theNode->doc, theNode, 0);
+      /* Adoption finds a namespace by its href, so it would declare a
+       * placeholder that is already in scope again, under a made-up
+       * prefix.  Such a one is kept out of the adoption.
+       */
+      if (resolved && NULL == ns->href)
+        {
+          attr->ns = NULL;
+        }
+      if (xmlDOMWrapAdoptNode(NULL, attr->doc, (xmlNodePtr)attr,
+        theNode->doc, theNode, 0) != 0)
+        {
+          /* The failed adoption set attr->doc but left the value nodes.  */
+          attr->doc = tmp;
+          xmlSetTreeDoc((xmlNodePtr)attr, theNode->doc);
+        }
+      if (resolved && NULL == ns->href)
+        {
+          attr->ns = ns;
+        }
 #else
       xmlSetTreeDoc((xmlNodePtr)attr, theNode->doc);
 #endif
+      if (tmp == GSIVar(attribute, detached))
+        {
+          GSIVar(attribute, detached) = 0;
+        }
       xmlFreeDoc(tmp);
 
       oldAttr = xmlHasNsProp(theNode, attr->name, ns->href);
@@ -376,17 +443,18 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
 - (void) setAttributes: (NSArray*)attributes
 {
   NSEnumerator	*enumerator = [attributes objectEnumerator];
+  NSArray	*currentAttributes = [self attributes]; 
   NSXMLNode	*attribute;
+  int 		index;
 
   // Remove all previous attributes
-  NSArray *currentAttributes = [self attributes]; 
-  int index;
   for (index = [currentAttributes count]-1; index >= 0; index--)
     {
-	  NSXMLNode *attrNode = [currentAttributes objectAtIndex:index];
-      NSString *name = [attrNode name];
-	  [self removeAttributeForName:name];
-	}
+      NSXMLNode	*attrNode = [currentAttributes objectAtIndex: index];
+      NSString	*name = [attrNode name];
+
+      [self removeAttributeForName: name];
+    }
 
   while ((attribute = [enumerator nextObject]) != nil)
     {
@@ -403,16 +471,17 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
 {
   NSEnumerator	*en = [attributes keyEnumerator];
   NSString	*key;
+  NSArray	*currentAttributes = [self attributes]; 
+  int 		index;
 
   // Remove all previous attributes
-  NSArray *currentAttributes = [self attributes]; 
-  int index;
   for (index = [currentAttributes count]-1; index >= 0; index--)
     {
-	  NSXMLNode *attrNode = [currentAttributes objectAtIndex:index];
-      NSString *name = [attrNode name];
-	  [self removeAttributeForName:name];
-	}
+      NSXMLNode	*attrNode = [currentAttributes objectAtIndex: index];
+      NSString	*name = [attrNode name];
+
+      [self removeAttributeForName: name];
+    }
 
   while ((key = [en nextObject]) != nil)
     {
@@ -425,9 +494,9 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
 
 - (NSArray*) attributes
 {
-  NSMutableArray *attributes = [NSMutableArray array];
-  xmlNodePtr theNode = internal->node.node;
-  xmlAttrPtr attributeNode = theNode->properties;
+  NSMutableArray	*attributes = [NSMutableArray array];
+  xmlNodePtr 		theNode = internal->node.node;
+  xmlAttrPtr 		attributeNode = theNode->properties;
 
   while (attributeNode)
     {
@@ -484,14 +553,14 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
       result = [NSXMLNode _objectForNode: (xmlNodePtr)attributeNode];
     }
     
-    return result;
+  return result;
 }
 
 - (void) addNamespace: (NSXMLNode*)aNamespace
 {
-  xmlNsPtr ns = xmlCopyNamespace((xmlNsPtr)[aNamespace _node]);
-  xmlNodePtr theNode = internal->node.node;
-  const xmlChar *prefix = ns->prefix;
+  xmlNsPtr		ns = xmlCopyNamespace((xmlNsPtr)[aNamespace _node]);
+  xmlNodePtr 		theNode = internal->node.node;
+  const xmlChar 	*prefix = ns->prefix;
 
   if (theNode->nsDef == NULL)
     {
@@ -504,9 +573,7 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
       
       while (cur != NULL)
         {
-          if ((prefix != NULL) &&
-              (cur->prefix != NULL) &&
-              (xmlStrcmp(prefix, cur->prefix) == 0))
+          if (xmlStrEqual(prefix, cur->prefix))
             {
               break;
             }
@@ -538,10 +605,17 @@ GS_PRIVATE_INTERNAL(NSXMLElement)
           ns->next = cur->next;
           cur->next = NULL;
         }
+      else
+        {
+          xmlFreeNs(ns);
+          ns = cur;
+          prefix = ns->prefix;
+        }
     }
 
   // Are we setting a default namespace?
-  if ((theNode->ns == NULL) && (xmlStrcmp(prefix, (const xmlChar*)"") == 0))
+  if ((theNode->ns == NULL)
+    && (prefix == NULL || xmlStrcmp(prefix, (const xmlChar*)"") == 0))
     {
       theNode->ns = ns;
     }
@@ -780,9 +854,9 @@ joinTextNodes(xmlNodePtr nodeA, xmlNodePtr nodeB, NSMutableArray *nodesToDelete)
 
 - (void) normalizeAdjacentTextNodesPreservingCDATA: (BOOL)preserve
 {
-  NSEnumerator *subEnum = [internal->subNodes objectEnumerator];
-  NSXMLNode *subNode = nil;
-  NSMutableArray *nodesToDelete = [NSMutableArray array];
+  NSEnumerator		*subEnum = [internal->subNodes objectEnumerator];
+  NSXMLNode		*subNode = nil;
+  NSMutableArray	*nodesToDelete = [NSMutableArray array];
 
   while ((subNode = [subEnum nextObject]))
     {
@@ -793,7 +867,7 @@ joinTextNodes(xmlNodePtr nodeA, xmlNodePtr nodeB, NSMutableArray *nodesToDelete)
       if (theNode->type == XML_ELEMENT_NODE)
 	{
 	  [(NSXMLElement *)subNode
-	    normalizeAdjacentTextNodesPreservingCDATA:preserve];
+	    normalizeAdjacentTextNodesPreservingCDATA: preserve];
 	}
       else if (theNode->type == XML_TEXT_NODE
 	|| (theNode->type == XML_CDATA_SECTION_NODE && !preserve))

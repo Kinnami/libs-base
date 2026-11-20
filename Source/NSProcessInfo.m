@@ -417,7 +417,10 @@ _gnu_process_args(int argc, char *argv[], char *env[])
     NSStringEncoding	enc = GSPrivateDefaultCStringEncoding();
 
 #if defined(_WIN32)
-    if (fallbackInitialisation == NO)
+    /* Also used when the caller supplied no environment, so that a process
+     * initialised that way has the one it was started with.
+     */
+    if (fallbackInitialisation == NO || 0 == env)
       {
 	unichar	*base;
 
@@ -464,6 +467,16 @@ _gnu_process_args(int argc, char *argv[], char *env[])
 	    FreeEnvironmentStringsW(base);
 	    env = 0;	// Suppress standard code.
 	  }
+      }
+#else
+    if (0 == env)
+      {
+	/* No environment was supplied, so we use the one the process was
+	 * started with rather than recording that it has none.
+	 */
+	extern char	**environ;
+
+	env = environ;
       }
 #endif
     if (env != 0)
@@ -996,8 +1009,8 @@ extern char **__libc_argv;
  * function to be called would be a compiler/linker issue (eg 'weak' not
  * supported).
  */
-int gnustep_base_user_main () __attribute__((weak));
-int gnustep_base_user_main (int argc, char *argv[], char *env[])
+int gnustep_base_user_main(int, char *[], char *[]) __attribute__((weak));
+int gnustep_base_user_main(int argc, char *argv[], char *env[])
 {
   fprintf(stderr, "\nGNUSTEP Internal Error:\n"
 "The GNUstep function to establish the argv and environment variables could\n"
@@ -1040,21 +1053,23 @@ int main(int argc, char *argv[], char *env[])
 
   if (!_gnu_sharedProcessInfoObject)
     {
-      _gnu_sharedProcessInfoObject = [[_NSConcreteProcessInfo alloc] init];
       [procLock lock];
-      if (mySet != nil)
+      if (!_gnu_sharedProcessInfoObject)
 	{
-	  NSEnumerator	*e = [mySet objectEnumerator];
-	  NSMutableSet	*s = [_gnu_sharedProcessInfoObject debugSet];
-	  id		o;
-
-	  while ((o = [e nextObject]) != nil)
+	  _gnu_sharedProcessInfoObject = [[_NSConcreteProcessInfo alloc] init];
+	  if (mySet != nil)
 	    {
-              [s addObject: o];
+	      NSEnumerator	*e = [mySet objectEnumerator];
+	      NSMutableSet	*s = [_gnu_sharedProcessInfoObject debugSet];
+	      id		o;
+
+	      while ((o = [e nextObject]) != nil)
+		{
+		  [s addObject: o];
+		}
+	      DESTROY(mySet);
 	    }
-	  [mySet release];
-	  mySet = nil;
-        }
+	}
       [procLock unlock];
     }
 
@@ -1747,7 +1762,7 @@ GSInitializeProcessAndroidWithArgs(JNIEnv *env, jobject context, int argc, char 
   // initialize process
   [procLock lock];
   fallbackInitialisation = YES;
-  _gnu_process_args(argc, argv, NULL);
+  _gnu_process_args(argc, argv, envp);
   [procLock unlock];
 
   jclass contextCls = (*env)->GetObjectClass(env, context);
@@ -1784,9 +1799,41 @@ GSInitializeProcessAndroidWithArgs(JNIEnv *env, jobject context, int argc, char 
   GS_JNI_CHECK(env, assetManagerJava);
   [NSBundle setJavaAssetManager:assetManagerJava withJNIEnv:env];
 
+  // a process started with execve gets the platform's default linker search
+  // path, which does not include the directory the package's own libraries
+  // are in, so a tool started from here is given it
+  {
+    NSProcessInfo	*info = [NSProcessInfo processInfo];
+    NSString		*dir = GSPrivateAndroidToolsDirectory();
+    NSString		*existing;
+
+    existing = [[info environment] objectForKey: @"LD_LIBRARY_PATH"];
+    if ([dir length] > 0)
+      {
+	if ([existing length] > 0)
+	  {
+	    dir = [NSString stringWithFormat: @"%@:%@", dir, existing];
+	  }
+	[info setValue: dir inEnvironment: @"LD_LIBRARY_PATH"];
+      }
+  }
+
   // clean up our NSTemporaryDirectory() if it exists
   NSString *tempDirName = [_androidCacheDir stringByAppendingPathComponent: @"tmp"];
   [[NSFileManager defaultManager] removeItemAtPath:tempDirName error:NULL];
+
+  // a tool started from here has no context of its own, so it would take its
+  // temporary directory from the environment and use a different one; ports
+  // are named within that directory, so the two would never meet
+  {
+    NSProcessInfo	*info = [NSProcessInfo processInfo];
+    NSString		*tmp = NSTemporaryDirectory();
+
+    if ([tmp length] > 0)
+      {
+	[info setValue: tmp inEnvironment: @"TMPDIR"];
+      }
+  }
 }
 #endif
 
@@ -1931,7 +1978,7 @@ GSPrivateEnvironmentFlag(const char *name, BOOL def)
 	{
 	  a = YES;
 	}
-      else if (isdigit(c[0]) && c[0] != '0')
+      else if (isdigit((uint8_t)c[0]) && c[0] != '0')
 	{
 	  a = YES;
 	}

@@ -112,6 +112,7 @@
 
 #import "../GSPrivate.h"
 
+static	NSCharacterSet	*spaceOrTab = nil;
 static	NSCharacterSet	*whitespace = nil;
 static	NSCharacterSet	*rfc822Specials = nil;
 static	NSCharacterSet	*rfc2045Specials = nil;
@@ -482,6 +483,44 @@ selectCharacterSet(NSString *str, NSData **d)
   return @"utf-8";		// Catch-all character set.
 }
 
+static NSData*
+encodeWord(NSData *word, NSString *charset)
+{
+  const uint8_t	*wordBytes = [word bytes];
+  int		wordLength = [word length];
+  int		charsetLength = [charset length];
+  NSUInteger	encodedLength = wordLength*4/3;
+  NSUInteger	totalLength = charsetLength + encodedLength + 8;
+  NSData	*result;
+  uint8_t	*buf;
+  uint8_t	*ptr;
+
+  if (NULL == (buf = malloc(totalLength)))
+    {
+      return nil;
+    }
+  ptr = buf;
+  *ptr++ = '=';
+  *ptr++ = '?';
+  [charset getCString: (char*)ptr
+	    maxLength: charsetLength + 1
+	     encoding: NSISOLatin1StringEncoding];
+  ptr += charsetLength;
+  *ptr++ = '?';
+  *ptr++ = 'B';
+  *ptr++ = '?';
+  GSPrivateEncodeBase64(wordBytes, wordLength, ptr);
+  ptr += encodedLength;
+  *ptr++ = '?';
+  *ptr++ = '=';
+  *ptr = '\0';	// not really needed
+  
+  result = [[NSData alloc] initWithBytesNoCopy: buf
+					length: totalLength
+				  freeWhenDone: YES]; 
+  return AUTORELEASE(result);
+}
+
 /**
  * Encode a word in a header according to RFC2047 if necessary.
  * For an ascii word, we just return the data.
@@ -500,22 +539,8 @@ wordData(NSString *word, BOOL *encoded)
     }
   else
     {
-      int		len = [charset length];
-      char		buf[len + 1];
-      NSMutableData	*md;
-
       *encoded = YES;
-      [charset getCString: buf
-		maxLength: len + 1
-		 encoding: NSISOLatin1StringEncoding];
-      md = [NSMutableData dataWithCapacity: [d length]*4/3 + len + 8];
-      d = [d base64EncodedDataWithOptions: 0];
-      [md appendBytes: "=?" length: 2];
-      [md appendBytes: buf length: len];
-      [md appendBytes: "?B?" length: 3];
-      [md appendData: d];
-      [md appendBytes: "?=" length: 2];
-      return md;
+      return encodeWord(d, charset);
     }
 }
 
@@ -547,9 +572,9 @@ wordData(NSString *word, BOOL *encoded)
  * Decode length bytes of data from sData and append the results to dData.<br />
  * Return YES on success, NO if there is an error.
  */
-- (BOOL) decodeData: (const void*)sData
+- (BOOL) decodeData: (const void *_Nonnull)sData
 	     length: (NSUInteger)length
-	   intoData: (NSMutableData*)dData
+	   intoData: (NSMutableData *_Nonnull)dData
 {
   NSUInteger	size = [dData length];
 
@@ -906,6 +931,8 @@ wordData(NSString *word, BOOL *encoded)
   rfc2045Specials = [m copy];
   [[NSObject leakAt: &rfc2045Specials] release];
   [m release];
+  spaceOrTab = [NSCharacterSet characterSetWithCharactersInString: @" \t"];
+  [NSObject leakAt: &spaceOrTab];
   whitespace = RETAIN([NSCharacterSet whitespaceAndNewlineCharacterSet]);
   [[NSObject leakAt: &whitespace] release];
 
@@ -1078,16 +1105,16 @@ wordData(NSString *word, BOOL *encoded)
       unsigned char                     *buf;
       unsigned char                     *beg;
       unsigned char		        *dst;
-      const char		        *src;
-      const char		        *end;
-      const char		        *footers;
+      const unsigned char	        *src;
+      const unsigned char	        *end;
+      const unsigned char	        *footers;
       BOOL                              atEnd;
 
       ctxt = (GSMimeChunkedDecoderContext*)con;
 
       /* Get pointers into source data buffer.
        */
-      src = (const char *)[sData bytes];
+      src = (const unsigned char *)[sData bytes];
       footers = src;
       src += aRange.location;
       end = src + aRange.length;
@@ -1799,7 +1826,7 @@ wordData(NSString *word, BOOL *encoded)
       NSString	*subtype;
 
       DESTROY(boundary);
-      if (tmp != nil)
+      if (tmp != nil && flags.multipartAsData == 0)
 	{
 	  NSUInteger	l = [tmp length];
 	  unsigned char	*b;
@@ -1836,7 +1863,7 @@ wordData(NSString *word, BOOL *encoded)
 	      subtype = @"mixed";
 	      [info setObject: subtype forKey: @"Subtype"];
 	    }
-	  if (boundary == nil)
+	  if (boundary == nil && flags.multipartAsData == 0)
 	    {
 	      NSLog(@"multipart message without boundary");
 	      return NO;
@@ -2367,6 +2394,17 @@ NSDebugMLLog(@"GSMime", @"Header parsed - %@", info);
   flags.isHttp = 1;
 }
 
+/**
+ * Tells the parser to read a multipart body as the data it is, rather
+ * than as a document of parts.  An HTTP client wants the body as the
+ * server sent it (less any transfer encoding): its Content-Type, with
+ * the boundary, has already been handed on.
+ */
+- (void) setMultipartAsData: (BOOL)flag
+{
+  flags.multipartAsData = flag ? 1 : 0;
+}
+
 @end
 
 @implementation	GSMimeParser (Private)
@@ -2459,7 +2497,8 @@ NSDebugMLLog(@"GSMime", @"Header parsed - %@", info);
 
       typeInfo = [document headerNamed: CteContentType];
       type = [typeInfo objectForKey: @"Type"];
-      if ([type isEqualToString: @"multipart"] == YES)
+      if ([type isEqualToString: @"multipart"] == YES
+	&& flags.multipartAsData == 0)
 	{
 	  NSLog(@"multipart decode attempt without boundary");
 	  flags.inBody = 0;
@@ -2692,7 +2731,7 @@ NSDebugMLLog(@"GSMime", @"Header parsed - %@", info);
 	      else if (sectionStart > 0)
 		{
 		  len -= sectionStart;
-		  memcpy(bytes, buf + sectionStart, len);
+		  memmove(bytes, buf + sectionStart, len);
 		  sectionStart = lineStart = 0;
 		  [data setLength: len];
 		  dataEnd = len;
@@ -4054,8 +4093,10 @@ quotedWord(const uint8_t *ptr, NSUInteger size, uint8_t *buffer)
 
 static NSUInteger
 appendBytes(NSMutableData *m, NSUInteger offset, NSUInteger fold,
-  const char *bytes, NSUInteger size)
+  const void *ptr, NSUInteger size)
 {
+  const uint8_t	*bytes = ptr;
+
   if (fold > 0 && offset + size > fold && size + 8 <= fold)
     {
       /* This would take the line beyond the folding limit,
@@ -4154,7 +4195,7 @@ appendBytes(NSMutableData *m, NSUInteger offset, NSUInteger fold,
 }
 
 static NSUInteger
-appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
+appendHeaderString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
   NSString *str, BOOL *ok)
 {
   NSUInteger    pos = 0;
@@ -4174,18 +4215,20 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
           NSData    *d = nil;
           BOOL      e = NO;
 
-          r = [str rangeOfCharacterFromSet: whitespace
+          r = [str rangeOfCharacterFromSet: spaceOrTab
                                    options: NSLiteralSearch
                                      range: r];
           if (r.length > 0 && r.location == pos)
             {
+	      unichar	c;
+
               /* Found space at the start of the string, so we reduce
                * it to a single space in the output, or omit it entirely
                * if the string contains nothing more but space.
                */
               pos++;
               while (pos < size
-                && [whitespace characterIsMember: [str characterAtIndex: pos]])
+                && (' ' == (c = [str characterAtIndex: pos]) || '\t' == c))
                 {
                   pos++;
                 }
@@ -4263,7 +4306,26 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
         }
       else if ([cset isEqualToString: @"us-ascii"])
         {
-          if (0 == fold)
+	  NSUInteger	i;
+
+	  /* Check for characters which are not legal in a header.
+	   */
+	  for (i = 0; i < len; i++)
+	    {
+	      uint8_t	c = ptr[i];
+
+	      if ((c < ' ' && c != '\t') || c > 126)
+		{
+		  break;
+		}
+	    }
+
+	  if (i < len)
+	    {
+	      /* Bad character found ...
+	       */
+	    }
+          else if (0 == fold)
             {
               /* Simple ... no folding to do so we can just add the ascii.
                */
@@ -4322,7 +4384,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
         }
 
       /* We get here to use encoded words, either because the text to be
-       * added contains non-ascii characters, or because it contains some
+       * added contains non-header characters, or because it contains some
        * non-foldable sequence too long to fit in the given line limit.
        */
       if (pos < len)
@@ -4438,7 +4500,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
                        fold: (NSUInteger)fold
                          ok: (BOOL*)ok
 {
-  return appendString(m, offset, fold, str, ok);
+  return appendHeaderString(m, offset, fold, str, ok);
 }
 */
 
@@ -4507,7 +4569,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
   else
     {
       NSUInteger        l = [d length];
-      char	        buf[l];
+      uint8_t	        buf[l];
       NSUInteger	i = 0;
 
       /*
@@ -4515,7 +4577,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
        * case - it is defined as being literally 'MIME-Version'
        */
       memcpy(buf, [d bytes], l);
-      if (l == 12 && strncasecmp(buf, "mime-version", 12) == 0)
+      if (l == 12 && strncasecmp((char*)buf, "mime-version", 12) == 0)
 	{
 	  memcpy(buf, "MIME-Version", 12);
 	}
@@ -4550,7 +4612,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
 
   offset = appendBytes(md, offset, fold, ":", 1);
   offset = appendBytes(md, offset, fold, " ", 1);
-  offset = appendString(md, offset, fold, value, &ok);
+  offset = appendHeaderString(md, offset, fold, value, &ok);
   if (ok == NO)
     {
       NSDebugMLLog(@"GSMime",
@@ -4590,7 +4652,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
         {
           offset = appendBytes(md, offset, fold, " ", 1);
         }
-      offset = appendString(md, offset, fold, k, &ok);
+      offset = appendHeaderString(md, offset, fold, k, &ok);
       if (ok == NO)
         {
 	  NSDebugMLLog(@"GSMime",
@@ -4610,7 +4672,7 @@ appendString(NSMutableData *m, NSUInteger offset, NSUInteger fold,
           [md appendBytes: "\r\n\t" length: 3];
           offset = 1;
         }
-      offset = appendString(md, offset, fold, v, &ok);
+      offset = appendHeaderString(md, offset, fold, v, &ok);
       if (ok == NO)
         {
 	  NSDebugMLLog(@"GSMime",
@@ -8932,7 +8994,7 @@ GS_PRIVATE_INTERNAL(GSMimeSMTPClient)
                       else
                         {
                           d = [NSData dataWithBytes: ptr length: i];
-                          memcpy(ptr, ptr + i, length - i);
+                          memmove(ptr, ptr + i, length - i);
                           length -= i;
                           [internal->rdata setLength: length];
                           ptr = [internal->rdata mutableBytes];
@@ -8993,7 +9055,7 @@ GS_PRIVATE_INTERNAL(GSMimeSMTPClient)
                     }
                   if (total < wlength)
                     {
-                      memcpy(wbytes, wbytes + total, wlength - total);
+                      memmove(wbytes, wbytes + total, wlength - total);
                     }
                   [internal->wdata setLength: wlength - total];
                   internal->woffset -= total;

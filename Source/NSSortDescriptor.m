@@ -114,12 +114,22 @@ static BOOL     initialized = NO;
 
   if (_comparator == NULL)
     {
-      result = (NSComparisonResult) [comparedKey1 performSelector: _selector
-                                                       withObject: comparedKey2];
+      /* nil is less than any value, as on macOS. */
+      if (comparedKey1 == nil || comparedKey2 == nil)
+        {
+          result = comparedKey1 == comparedKey2 ? NSOrderedSame
+            : (comparedKey1 == nil ? NSOrderedAscending : NSOrderedDescending);
+        }
+      else
+        {
+          result = (NSComparisonResult) [comparedKey1
+            performSelector: _selector withObject: comparedKey2];
+        }
     }
   else
     {
-      result = CALL_NON_NULL_BLOCK(((NSComparator)_comparator), comparedKey1, comparedKey2);
+      result = CALL_NON_NULL_BLOCK(((NSComparator)_comparator),
+	comparedKey1, comparedKey2);
     }
   
   if (_ascending == NO)
@@ -148,12 +158,15 @@ static BOOL     initialized = NO;
   if (_comparator == NULL)
     {
       copy = [[NSSortDescriptor allocWithZone: zone]
-               initWithKey: _key ascending: _ascending selector: _selector];
+        initWithKey: _key ascending: _ascending selector: _selector];
     }
   else
     {
+#pragma GCC diagnostic push 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations" 
       copy = [[NSSortDescriptor allocWithZone: zone]
-               initWithKey: _key ascending: _ascending comparator: _comparator];
+	initWithKey: _key ascending: _ascending comparator: _comparator];
+#pragma GCC diagnostic pop 
     }
   return copy;
 }
@@ -177,7 +190,7 @@ static BOOL     initialized = NO;
   return AUTORELEASE([[self alloc] initWithKey: aKey ascending: ascending]);
 }
 
-+ (id) sortDescriptorWithKey: (NSString *)aKey 
++ (id) sortDescriptorWithKey: (NSString*)aKey 
                    ascending: (BOOL)ascending 
                     selector: (SEL)aSelector
 {
@@ -186,24 +199,23 @@ static BOOL     initialized = NO;
                                       selector: aSelector]);
 }
 
-+ (id)sortDescriptorWithKey: (NSString *)key 
-                  ascending: (BOOL)ascending 
-                 comparator: (NSComparator)cmptr
++ (id) sortDescriptorWithKey: (NSString*)key 
+                   ascending: (BOOL)ascending 
+                  comparator: (NSComparator)cmptr
 {
   return AUTORELEASE([[self alloc] initWithKey: key
                                      ascending: ascending
                                     comparator: cmptr]);
-  
 }
 
-- (id) initWithKey: (NSString *) key ascending: (BOOL) ascending
+- (id) initWithKey: (NSString*) key ascending: (BOOL) ascending
 {
   return [self initWithKey: key ascending: ascending selector: NULL];
 }
 
-- (id) initWithKey: (NSString *) key
-         ascending: (BOOL) ascending
-        comparator: (NSComparator) cmptr
+- (id) initWithKey: (NSString*)key
+         ascending: (BOOL)ascending
+        comparator: (NSComparator)cmptr
 {
   if ((self = [self init]) != nil)
     {
@@ -222,7 +234,7 @@ static BOOL     initialized = NO;
 
       ASSIGN(_key, key);
       _ascending = ascending;
-      ASSIGN(_comparator, (id)cmptr);
+      ASSIGNCOPY(_comparator, (id)cmptr);
 
       return self;
     }
@@ -232,9 +244,9 @@ static BOOL     initialized = NO;
     }
 }
 
-- (id) initWithKey: (NSString *) key
-         ascending: (BOOL) ascending
-          selector: (SEL) selector
+- (id) initWithKey: (NSString*)key
+         ascending: (BOOL)ascending
+          selector: (SEL)selector
 {
   if ((self = [self init]) != nil)
     {
@@ -298,7 +310,7 @@ static BOOL     initialized = NO;
   return _selector;
 }
 
-- (void) encodeWithCoder: (NSCoder *) coder
+- (void) encodeWithCoder: (NSCoder*)coder
 {
   if ([coder allowsKeyedCoding])
     {
@@ -315,7 +327,7 @@ static BOOL     initialized = NO;
     }
 }
 
-- (id) initWithCoder: (NSCoder *)decoder
+- (id) initWithCoder: (NSCoder*)decoder
 {
   if ((self = [super init]) != nil)
     {
@@ -436,7 +448,7 @@ GSSortUnstableConcurrent(id* buffer, NSRange range, id descriptorOrComparator,
 
 @implementation NSArray (NSSortDescriptorSorting)
 
-- (NSArray *) sortedArrayUsingDescriptors: (NSArray *)sortDescriptors
+- (NSArray*) sortedArrayUsingDescriptors: (NSArray*)sortDescriptors
 {
   NSMutableArray *sortedArray = [GSMutableArray arrayWithArray: self];
 
@@ -490,7 +502,7 @@ SortRange(id *objects, NSRange range, id *descriptors,
 
 @implementation NSMutableArray (NSSortDescriptorSorting)
 
-- (void) sortUsingDescriptors: (NSArray *)sortDescriptors
+- (void) sortUsingDescriptors: (NSArray*)sortDescriptors
 {
   NSUInteger	count = [self count];
   NSUInteger	numDescriptors = [sortDescriptors count];
@@ -527,7 +539,7 @@ SortRange(id *objects, NSRange range, id *descriptors,
 
 @implementation GSMutableArray (NSSortDescriptorSorting)
 
-- (void) sortUsingDescriptors: (NSArray *)sortDescriptors
+- (void) sortUsingDescriptors: (NSArray*)sortDescriptors
 {
   NSUInteger	dCount = [sortDescriptors count];
 
@@ -558,9 +570,9 @@ SortRange(id *objects, NSRange range, id *descriptors,
 
 @implementation NSSet (NSSortDescriptorSorting) 
 
-- (NSArray *) sortedArrayUsingDescriptors: (NSArray *)sortDescriptors
+- (NSArray*) sortedArrayUsingDescriptors: (NSArray*)sortDescriptors
 {
-	return [[self allObjects] sortedArrayUsingDescriptors: sortDescriptors];
+  return [[self allObjects] sortedArrayUsingDescriptors: sortDescriptors];
 }
 
 @end

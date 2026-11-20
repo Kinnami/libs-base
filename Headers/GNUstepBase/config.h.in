@@ -60,6 +60,9 @@
 /* Built in default value for GNUstep local library */
 #undef GNUSTEP_TARGET_LOCAL_LIBRARY
 
+/* Built in default value for GNUstep local resources */
+#undef GNUSTEP_TARGET_LOCAL_RESOURCES
+
 /* Built in default value for GNUstep local services */
 #undef GNUSTEP_TARGET_LOCAL_SERVICES
 
@@ -102,6 +105,9 @@
 /* Built in default value for GNUstep network library */
 #undef GNUSTEP_TARGET_NETWORK_LIBRARY
 
+/* Built in default value for GNUstep network resources */
+#undef GNUSTEP_TARGET_NETWORK_RESOURCES
+
 /* Built in default value for GNUstep network services */
 #undef GNUSTEP_TARGET_NETWORK_SERVICES
 
@@ -140,6 +146,9 @@
 
 /* Built in default value for GNUstep system library */
 #undef GNUSTEP_TARGET_SYSTEM_LIBRARY
+
+/* Built in default value for GNUstep system resources */
+#undef GNUSTEP_TARGET_SYSTEM_RESOURCES
 
 /* Built in default value for GNUstep system services */
 #undef GNUSTEP_TARGET_SYSTEM_SERVICES
@@ -185,6 +194,9 @@
 
 /* Built in default value for GNUstep user_dir library */
 #undef GNUSTEP_TARGET_USER_DIR_LIBRARY
+
+/* Built in default value for GNUstep user_dir resources */
+#undef GNUSTEP_TARGET_USER_DIR_RESOURCES
 
 /* Built in default value for GNUstep user_dir services */
 #undef GNUSTEP_TARGET_USER_DIR_SERVICES
@@ -243,6 +255,9 @@
    */
 #undef HAVE_DIRENT_H
 
+/* Define if libdispatch has the autorelease pool hooks */
+#undef HAVE_DISPATCH_AUTORELEASE_POOL_HOOKS
+
 /* Define to 1 if you have the 'dispatch_cancel' function. */
 #undef HAVE_DISPATCH_CANCEL
 
@@ -285,6 +300,9 @@
 
 /* Define to 1 if fseeko (and ftello) are declared in stdio.h. */
 #undef HAVE_FSEEKO
+
+/* Define if __atomic builtins are available */
+#undef HAVE_GCC_ATOMIC_BUILTINS
 
 /* Define to 1 if you have the 'getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
@@ -397,6 +415,9 @@
 /* Define to 1 if you have the <langinfo.h> header file. */
 #undef HAVE_LANGINFO_H
 
+/* Define to 1 if you have the 'atomic' library (-latomic). */
+#undef HAVE_LIBATOMIC
+
 /* Define to 1 if you have the 'bfd' library (-lbfd). */
 #undef HAVE_LIBBFD
 
@@ -483,6 +504,9 @@
 
 /* Define to 1 if you have the <netinet/in.h> header file. */
 #undef HAVE_NETINET_IN_H
+
+/* Define to 1 if you have the 'objc_autoreleasePoolPush' function. */
+#undef HAVE_OBJC_AUTORELEASEPOOLPUSH
 
 /* Define to 1 if you have the 'objc_enumerationMutation' function. */
 #undef HAVE_OBJC_ENUMERATIONMUTATION
@@ -690,6 +714,9 @@
    */
 #undef HAVE_SYS_DIR_H
 
+/* Define to 1 if you have the <sys/eventfd.h> header file. */
+#undef HAVE_SYS_EVENTFD_H
+
 /* Define to 1 if you have the <sys/fcntl.h> header file. */
 #undef HAVE_SYS_FCNTL_H
 
@@ -882,6 +909,9 @@
 
 /* Define to 1 if you have the <ws2tcpip.h> header file. */
 #undef HAVE_WS2TCPIP_H
+
+/* Define to 1 if you have the 'xmlCtxtGetOptions' function. */
+#undef HAVE_XMLCTXTGETOPTIONS
 
 /* Define to 1 if you have the 'xmlStopParser' function. */
 #undef HAVE_XMLSTOPPARSER

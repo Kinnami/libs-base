@@ -52,7 +52,7 @@
 @interface GSOrderedSet : NSOrderedSet
 {
 @public
-  GSIArray_t array;
+  GSIArray_t	array;
   GSIMapTable_t	map;
 }
 @end
@@ -60,16 +60,20 @@
 @interface GSMutableOrderedSet : NSMutableOrderedSet
 {
 @public
-  GSIArray_t array;
+  GSIArray_t	array;
   GSIMapTable_t	map;
 @private
   unsigned long	_version;
 }
 @end
 
+@interface NSOrderedSet (Private)
+- (void) _raiseRangeExceptionWithIndex: (NSUInteger)index from: (SEL)sel;
+@end
+
 @interface GSOrderedSetEnumerator : NSEnumerator
 {
-  GSOrderedSet *set;
+  GSOrderedSet	*set;
   unsigned      current;
   unsigned      count;
 }
@@ -178,7 +182,8 @@ static Class	mutableSetClass;
 
 - (NSEnumerator*) reverseObjectEnumerator
 {
-  return AUTORELEASE([[GSOrderedSetEnumeratorReverse alloc] initWithOrderedSet: self]);
+  return AUTORELEASE([[GSOrderedSetEnumeratorReverse alloc]
+    initWithOrderedSet: self]);
 }
 
 - (NSUInteger) sizeInBytesExcluding: (NSHashTable*)exclude
@@ -187,8 +192,8 @@ static Class	mutableSetClass;
 
   if (size > 0)
     {
-      NSUInteger count = [self count];
-      NSUInteger i = 0;
+      NSUInteger	count = [self count];
+      NSUInteger	i = 0;
 
       for (i = 0; i < count; i++)
 	{
@@ -221,7 +226,13 @@ static Class	mutableSetClass;
 
 - (id) objectAtIndex: (NSUInteger)index
 {
-  GSIArrayItem item = GSIArrayItemAtIndex(&array, index);
+  GSIArrayItem item;
+
+  if (index >= GSIArrayCount(&array))
+    {
+      [self _raiseRangeExceptionWithIndex: index from: _cmd];
+    }
+  item = GSIArrayItemAtIndex(&array, index);
   return item.obj;
 }
 
@@ -290,6 +301,10 @@ static Class	mutableSetClass;
       [NSException raise: NSInvalidArgumentException
 		  format: @"Tried to add nil to set"];
     }
+  else if (index > GSIArrayCount(&array))
+    {
+      [self _raiseRangeExceptionWithIndex: index from: _cmd];
+    }
   else
     {
       if ([self containsObject: object] == NO)
@@ -307,11 +322,19 @@ static Class	mutableSetClass;
 
 - (void) removeObjectAtIndex: (NSUInteger)index
 {
-  GSIArrayItem item = GSIArrayItemAtIndex(&array, index);
+  GSIArrayItem item;
 
+  if (index >= GSIArrayCount(&array))
+    {
+      [self _raiseRangeExceptionWithIndex: index from: _cmd];
+    }
+  item = GSIArrayItemAtIndex(&array, index);
   _version++;
-  GSIArrayRemoveItemAtIndex(&array, index);
+  /* Remove from the map first: removing from the array releases the object,
+   * and the map needs to hash it to find its bucket.
+   */
   GSIMapRemoveKey(&map, (GSIMapKey)item.obj);
+  GSIArrayRemoveItemAtIndex(&array, index);
   _version++;
 }
 

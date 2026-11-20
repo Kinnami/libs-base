@@ -72,7 +72,7 @@ exact(GSMimeParser **parserPointer, NSData *data)
 
 int main()
 {
-  NSAutoreleasePool   *arp = [NSAutoreleasePool new];
+  ENTER_POOL
   NSData *cr;
   NSData *data;
   NSData *orig;
@@ -264,6 +264,18 @@ int main()
   PASS_EQUAL(idoc, doc, "rawMimeData reproduces document with 'Q' header");
 //  NSLog(@"Made\n%@\nOrig\n%@", data, orig);
 
+  /* Check embedded newline in subject
+   */
+  str = @"Embedded\r\nNewline";
+  idoc = [GSMimeDocument documentWithContent: @"hello"
+                                        type: @"text/plain"
+                                        name: nil];
+  [idoc setHeader: @"MIME-Version" value: @"1.0" parameters: nil];
+  [idoc setHeader: @"Subject" value: str parameters: nil];
+  data = [idoc rawMimeData];
+  doc = [GSMimeParser documentFromData: data];
+  PASS_EQUAL(idoc, doc, "can encode and parse a header with embedded CRLF")
+
   if (NO == oldStyleFolding)
     {
       [idoc setHeader: @"Subject" value: @"==répà==" parameters: nil];
@@ -289,7 +301,20 @@ int main()
   PASS([[doc allHeaders] count] == 0, "empty document part has no headers")
   PASS_EQUAL([doc content], nil, "empty document part has no content")
 
-  [arp release]; arp = nil;
+  orig = [NSData dataWithContentsOfFile: @"mime14.dat"];
+  doc = [GSMimeParser documentFromData: orig];
+  PASS([[doc allHeaders] count] == 6, "special character doc has 6 headers")
+  PASS_EQUAL([[doc headerNamed: @"from"] value],
+    @"José\r\nAdmin <jose@example.com>", 
+    "special character doc decodes from header correctly")
+  PASS_EQUAL([[doc headerNamed: @"subject"] value],
+    @"Hello\r\nWorld — Café",
+    "special character doc decodes subject header correctly")
+  data = [doc rawMimeData];
+  idoc = [GSMimeParser documentFromData: data];
+  PASS_EQUAL(idoc, doc, "encode/parse cycle OK for special character doc")
+
+  LEAVE_POOL
   return 0;
 }
 #else

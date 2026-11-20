@@ -276,7 +276,7 @@ etcHosts(BOOL flush)
 		}
 
 	      // Skip comments
-	      while (isspace(*line))
+	      while (isspace(*(uint8_t*)line))
 		{
 		  line++;
 		}
@@ -1029,6 +1029,11 @@ dnsaliases(NSString *host, NSMutableSet *names)
       NSLog(@"Nil host name sent to [NSHost +hostWithName:]");
       return nil;
     }
+  if (NO == [name isKindOfClass: [NSString class]])
+    {
+      NSLog(@"Non-string host name sent to [NSHost +hostWithName:]");
+      return nil;
+    }
   if ([name isEqual: @""] == YES)
     {
       NSLog(@"Empty host name sent to [NSHost +hostWithName:]");
@@ -1353,6 +1358,44 @@ dnsaliases(NSString *host, NSMutableSet *names)
 @end
 
 @implementation	NSHost (GNUstep)
++ (NSHost*) cachedHostWithName: (NSString*)name
+{
+  NSHost	*host = nil;
+
+  if (name == nil)
+    {
+      NSLog(@"Nil host name sent to [NSHost +cachedHostWithName:]");
+      return nil;
+    }
+  if (NO == [name isKindOfClass: [NSString class]])
+    {
+      NSLog(@"Non-string host name sent to [NSHost +cachedHostWithName:]");
+      return nil;
+    }
+  if ([name isEqual: @""] == YES)
+    {
+      NSLog(@"Empty host name sent to [NSHost +cachedHostWithName:]");
+      return nil;
+    }
+
+  /* If this looks like an address rather than a host name ...
+   * call the correct method instead of this one.
+   */
+  if (NULL == getName(name))
+    {
+      return [self hostWithAddress: name];
+    }
+
+  if (YES == _hostCacheEnabled)
+    {
+      [_hostCacheLock lock];
+      host = RETAIN([_hostCache objectForKey: name]);
+      [_hostCacheLock unlock];
+    }
+
+  return host;
+}
+
 + (NSHost*) localHost
 {
   return [self hostWithName: localHostName];

@@ -77,7 +77,7 @@ GS_EXPORT_CLASS
   NSActivityOptions _opts;
   id _token;
   NSString *_reason;
-  BLOCK_SCOPE GSScheduledBlock _block;
+  GSScheduledBlock _block;
 }
   
 - (instancetype) initWithIdentifier: (NSString *)identifier;
@@ -100,7 +100,8 @@ GS_EXPORT_CLASS
 - (BOOL) shouldDefer;
 - (void) setShouldDefer: (BOOL)flag;
   
-- (void) scheduleWithBlock: (GSScheduledBlock)block;
+- (void) scheduleWithBlock: (GSScheduledBlock)block
+  GS_NON_PORTABLE(we need delegate/callback based functionality);
   
 - (void) invalidate;
   

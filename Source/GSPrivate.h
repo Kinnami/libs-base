@@ -27,6 +27,7 @@
 
 #import "Foundation/NSBundle.h"
 #import "Foundation/NSError.h"
+#import "Foundation/NSRunLoop.h"
 
 @class	_GSInsensitiveDictionary;
 @class	_GSMutableInsensitiveDictionary;
@@ -333,9 +334,14 @@ typedef enum {
 - (void) _setObject: (NSObject*)anObject forKey: (NSString*)aKey;
 @end
 
-@class  NSRunLoop;
 @class  NSLock;
 @class  NSThread;
+@class  NSTimer;
+
+@interface	NSRunLoop (Internal)
++ (NSString*) nameOfEventType: (RunLoopEventType)type;
++ (void) _repositionTimer: (NSTimer*)timer;
+@end
 
 /* Used to handle events performed in one thread from another.
  */
@@ -352,17 +358,21 @@ typedef enum {
   int                   outputFd;
 #endif	
 }
-/* Add a performer to be run in the loop's thread.  May be called from
- * any thread.
+/* Fire all pending performers matching the current threads run loop mode.
+ * Returns YES if any matching performer was found.
  */
-- (void) addPerformer: (id)performer;
-/* Fire all pending performers in the current thread.  May only be called
- * from the runloop when the event/descriptor is triggered.
- */
-- (void) fire;
+- (BOOL) fire;
 /* Cancel all pending performers.
  */
 - (void) invalidate;
+/* Read event notifications from the event source. This must only be called
+ * when a run loop has determined the the source has been triggered.
+ */
+- (void) reset;
+/* May be called from any thread to wake the run loop.
+ * Optionally add a performer to be run in the loop's thread upon waking.
+ */
+- (void) wakeFor: (id)performer;
 @end
 
 /* Return (and optionally create) GSRunLoopThreadInfo for the specified
@@ -568,6 +578,16 @@ GSPrivateStrExternalize(GSStr s) GS_ATTRIB_PRIVATE;
 NSString *
 GSPrivateSymbolPath(Class theClass) GS_ATTRIB_PRIVATE;
 
+#if	defined(__ANDROID__)
+/* GSPrivateAndroidToolsDirectory() returns the directory this library was
+ * loaded from, which on Android is the directory a package's executable files
+ * are installed into and the only directory a tool may be started from.
+ * Returns nil where the library's own location cannot be determined.
+ */
+NSString *
+GSPrivateAndroidToolsDirectory(void) GS_ATTRIB_PRIVATE;
+#endif
+
 /* Combining class for composite unichars
  */
 unsigned char
@@ -674,6 +694,10 @@ BOOL GSPrivateMarkedWeak(id obj, BOOL mark) GS_ATTRIB_PRIVATE;
 void GSWeakInit() GS_ATTRIB_PRIVATE;
 BOOL objc_delete_weak_refs(id obj);
 #endif
+
+/* Returns YES if the host string of a URL is an IP address, not a name.
+ */
+BOOL GSPrivateIsAddress(NSString *host) GS_ATTRIB_PRIVATE;
 
 #endif /* _GSPrivate_h_ */
 

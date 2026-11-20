@@ -90,6 +90,7 @@ GS_EXPORT_CLASS
   void	*lib;	// pointer to xmllib pointer of xmlDoc struct
   id	_parent;
   BOOL	_ownsLib;
+  void	*_xslt;
 }
 + (GSXMLDocument*) documentWithVersion: (NSString*)version;
 
@@ -258,6 +259,11 @@ GS_EXPORT_CLASS
   GSXMLParser	*parser;
 @protected
   BOOL		isHtmlHandler;
+@public
+  BOOL		validate;
+  BOOL		keepBlanks;
+  BOOL		replaceEntities;
+  BOOL		stopped;
 }
 + (GSSAXHandler*) handler;
 - (void*) lib;

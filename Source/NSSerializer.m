@@ -885,7 +885,7 @@ deserializeFromInfo(_NSDeserializerInfo* info)
 {
   _NSDeserializerInfo	info;
   unsigned int	cursor = 0;
-  id		o;
+  id		o = nil;
 
   if (data == nil || [data isKindOfClass: [NSData class]] == NO)
     {
@@ -893,8 +893,13 @@ deserializeFromInfo(_NSDeserializerInfo* info)
     }
   if (initDeserializerInfo(&info, data, &cursor, flag) == YES)
     {
-      o = deserializeFromInfo(&info);
-      endDeserializerInfo(&info);
+      NS_DURING
+        o = deserializeFromInfo(&info);
+        endDeserializerInfo(&info);
+      NS_HANDLER
+        endDeserializerInfo(&info);
+	[localException raise];
+      NS_ENDHANDLER
       return AUTORELEASE(o);
     }
   else

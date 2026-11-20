@@ -90,8 +90,14 @@ skip_argspec(const char *ptr)
   if (ptr != NULL)
     {
       ptr = NSGetSizeAndAlignment(ptr, NULL, NULL);
-      if (*ptr == '+') ptr++;
-      while (isdigit(*ptr)) ptr++;
+      if (*ptr == '+')
+	{
+	  ptr++;
+	}
+      while (isdigit(*(uint8_t*)ptr))
+	{
+	  ptr++;
+	}
     }
   return ptr;
 }
@@ -1580,6 +1586,15 @@ static NSLock	*cached_proxies_gate = nil;
 - (NSTimeInterval) replyTimeout
 {
   return IreplyTimeout;
+}
+
+/**
+ * Returns the first run loop mode that the NSConnection
+ * uses when waiting for an incoming request.
+ */
+- (NSString*) requestMode
+{
+  return [[self requestModes] firstObject];
 }
 
 /**

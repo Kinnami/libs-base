@@ -30,6 +30,7 @@
 #import "Foundation/NSNotification.h"
 #import "Foundation/NSRunLoop.h"
 #import "Foundation/NSSet.h"
+#import "Foundation/NSThread.h"
 #import "Foundation/NSValue.h"
 
 #if     GS_HAVE_NSURLSESSION
@@ -40,9 +41,11 @@
 
 #import "GSPrivate.h"
 #import "GSURLPrivate.h"
+#import "GSRunLoopScheduler.h"
 #import "GNUstepBase/GSMime.h"
 #import "GNUstepBase/GSTLS.h"
 #import "GNUstepBase/NSData+GNUstepBase.h"
+#import "GNUstepBase/NSHost+GNUstepBase.h"
 #import "GNUstepBase/NSStream+GNUstepBase.h"
 #import "GNUstepBase/NSString+GNUstepBase.h"
 #import "GNUstepBase/NSURL+GNUstepBase.h"
@@ -439,6 +442,8 @@ typedef struct {
   NSURLSessionTask  		*task;
   NSString                      *in;
   NSString                      *out;
+  GSRunLoopScheduler		*sched;
+  BOOL				loadingStarted;
 #if	USE_ZLIB
   z_stream			z;		// context for decompress
   BOOL				compressing;	// are we compressing?
@@ -564,15 +569,14 @@ typedef struct {
 	{
 	  [this->input setDelegate: nil];
 	  [this->output setDelegate: nil];
-	  [this->input removeFromRunLoop: [NSRunLoop currentRunLoop]
-				 forMode: NSDefaultRunLoopMode];
-	  [this->output removeFromRunLoop: [NSRunLoop currentRunLoop]
-				  forMode: NSDefaultRunLoopMode];
+	  [this->sched remove: this->input];
+	  [this->sched remove: this->output];
           [this->input close];
           [this->output close];
           DESTROY(this->input);
           DESTROY(this->output);
 	}
+      DESTROY(this->sched);
       DESTROY(this->in);
       DESTROY(this->out);
       DESTROY(this->cachedResponse);
@@ -598,7 +602,7 @@ typedef struct {
       _NSURLProtocolInternal = 0;
 #endif
     }
-  [super dealloc];
+  DEALLOC
 }
 
 - (NSString*) description
@@ -821,127 +825,15 @@ typedef struct {
   [super dealloc];
 }
 
-- (void) startLoading
+- (void) _gotHost: (NSHost*)host
 {
-  static NSSet	*methods = nil;
-
-  _debug = GSDebugSet(@"NSURLProtocol");
-  if (YES == [this->request _debug])
-    {
-      _debug = YES;
-    }
-  if (_debug)
-    {
-      _logDelegate = [this->request _debugLogDelegate];
-    }
-
-  if (methods == nil)
-    {
-      methods = [[NSSet alloc] initWithObjects: 
-	@"HEAD",
-	@"GET",
-	@"POST",
-	@"PUT",
-	@"DELETE",
-	@"TRACE",
-	@"OPTIONS",
-	@"CONNECT",
-	nil];
-      }
-  if ([methods member: [this->request HTTPMethod]] == nil)
-    {
-      NSLog(@"Invalid HTTP Method: %@", this->request);
-      [self stopLoading];		// breaks retain loops
-      [this->client URLProtocol: self didFailWithError:
-	[NSError errorWithDomain: @"Invalid HTTP Method"
-			    code: 0
-			userInfo: nil]];
-      return;
-    }
-  if (_isLoading == YES)
-    {
-      NSLog(@"startLoading when load in progress");
-      return;
-    }
-
-  _statusCode = 0;	/* No status returned yet.	*/
-  _isLoading = YES;
-  _complete = NO;
-
-  /* Perform a redirect if the path is empty.
-   * As per MacOs-X documentation.
-   */
-  if ([[[this->request URL] pathWithEscapes] length] == 0)
-    {
-      NSString		*s = [[this->request URL] absoluteString];
-      NSURL		*url;
-
-      if ([s rangeOfString: @"?"].length > 0)
-        {
-	  s = [s stringByReplacingString: @"?" withString: @"/?"];
-	}
-      else if ([s rangeOfString: @"#"].length > 0)
-        {
-	  s = [s stringByReplacingString: @"#" withString: @"/#"];
-	}
-      else
-        {
-          s = [s stringByAppendingString: @"/"];
-	}
-      url = [NSURL URLWithString: s];
-      if (url == nil)
-	{
-	  NSError	*e;
-
-	  e = [NSError errorWithDomain: @"Invalid redirect request"
-				  code: 0
-			      userInfo: nil];
-	  [self stopLoading];		// breaks retain loops
-	  [this->client URLProtocol: self
-		   didFailWithError: e];
-	}
-      else
-	{
-	  NSMutableURLRequest	*r;
-
-	  r = [[this->request mutableCopy] autorelease];
-	  [r setURL: url];
-	  AUTORELEASE(RETAIN(self));
-	  [this->client URLProtocol: self
-	     wasRedirectedToRequest: r
-		   redirectResponse: nil];
-	}
-      if (NO == _isLoading)
-        {
-	  return;	// Loading cancelled
-	}
-      if (nil != this->input)
-	{
-	  return;	// Following redirection
-	}
-      // Fall through to continue original connect.
-    }
-
-  if (0 && this->cachedResponse)
-    {
-    }
-  else
+  if (_isLoading)
     {
       NSURL	*url = [this->request URL];
-      NSHost	*host = [NSHost hostWithName: [url host]];
       int	port = [[url port] intValue];
 
       _parseOffset = 0;
       DESTROY(_parser);
-
-      if (host == nil)
-        {
-	  host = [NSHost hostWithAddress: [url host]];	// try dotted notation
-	}
-      if (host == nil)
-        {
-	  host = [NSHost hostWithAddress: @"127.0.0.1"];	// final default
-	}
       if (port == 0)
         {
 	  // default if not specified
@@ -1013,15 +905,22 @@ typedef struct {
             }
           /* If there is no value set for the server name, and the host in the
            * URL is a domain name rather than an address, we use that.
+           * An address can't be sent as a server name, and the stream's own
+           * value is a name found by looking the address up, which says
+           * nothing about the server, so we replace it with an empty string
+           * (no server name) and verify against the address in the URL.
            */
 	  key = GSTLSServerName;
 	  if (nil == (val = [this->request _propertyForKey: key]))
             {
               NSString  *host = [url host];
-              unichar   c;
 
-              c = [host length] == 0 ? 0 : [host characterAtIndex: 0];
-              if (c != 0 && c != ':' && !isdigit(c))
+              if (GSPrivateIsAddress(host))
+                {
+                  [this->output setProperty: @"" forKey: key];
+                  [this->output setProperty: host forKey: GSTLSRemoteHosts];
+                }
+              else if ([host length] > 0)
                 {
                   [this->output setProperty: host forKey: key];
                 }
@@ -1045,12 +944,169 @@ typedef struct {
         }
       [this->input setDelegate: self];
       [this->output setDelegate: self];
-      [this->input scheduleInRunLoop: [NSRunLoop currentRunLoop]
-			     forMode: NSDefaultRunLoopMode];
-      [this->output scheduleInRunLoop: [NSRunLoop currentRunLoop]
-			      forMode: NSDefaultRunLoopMode];
+      [this->sched schedule: this->input];
+      [this->sched schedule: this->output];
+
       [this->input open];
       [this->output open];
+    }
+}
+
+- (void) startLoading
+{
+  static NSSet	*methods = nil;
+
+  _debug = GSDebugSet(@"NSURLProtocol");
+  if (YES == [this->request _debug])
+    {
+      _debug = YES;
+    }
+  if (_debug)
+    {
+      _logDelegate = [this->request _debugLogDelegate];
+    }
+
+  if (methods == nil)
+    {
+      methods = [[NSSet alloc] initWithObjects: 
+	@"HEAD",
+	@"GET",
+	@"POST",
+	@"PUT",
+	@"PATCH",
+	@"DELETE",
+	@"TRACE",
+	@"OPTIONS",
+	@"CONNECT",
+	nil];
+      }
+  if ([methods member: [this->request HTTPMethod]] == nil)
+    {
+      NSLog(@"Invalid HTTP Method: %@", this->request);
+      [self stopLoading];		// breaks retain loops
+      [this->client URLProtocol: self didFailWithError:
+	[NSError errorWithDomain: @"Invalid HTTP Method"
+			    code: 0
+			userInfo: nil]];
+      return;
+    }
+  if (_isLoading == YES)
+    {
+      NSLog(@"startLoading when load in progress");
+      return;
+    }
+
+  if (nil == this->sched)
+    {
+      /* Get a copy of the run loop scheduling information from the connection
+       * if possible.  Otherwise use default values.
+       */
+      if ([this->client respondsToSelector: @selector(_scheduled)])
+	{
+	  this->sched = [(GSRunLoopScheduler*)
+	    [(NSURLConnection*)this->client _scheduled] copy];
+	}
+      if (nil == this->sched)
+	{
+	  this->sched = [GSRunLoopScheduler new];
+	  [this->sched scheduleInRunLoop: [NSRunLoop currentRunLoop]
+				 forMode: NSDefaultRunLoopMode];
+	}
+    }
+
+  _statusCode = 0;	/* No status returned yet.	*/
+  _isLoading = YES;
+  _complete = NO;
+
+  /* Perform a redirect if the path is empty.
+   * As per MacOs-X documentation.
+   */
+  if ([[[this->request URL] pathWithEscapes] length] == 0)
+    {
+      NSString		*s = [[this->request URL] absoluteString];
+      NSURL		*url;
+
+      if ([s rangeOfString: @"?"].length > 0)
+        {
+	  s = [s stringByReplacingString: @"?" withString: @"/?"];
+	}
+      else if ([s rangeOfString: @"#"].length > 0)
+        {
+	  s = [s stringByReplacingString: @"#" withString: @"/#"];
+	}
+      else
+        {
+          s = [s stringByAppendingString: @"/"];
+	}
+      url = [NSURL URLWithString: s];
+      if (url == nil)
+	{
+	  NSError	*e;
+
+	  e = [NSError errorWithDomain: @"Invalid redirect request"
+				  code: 0
+			      userInfo: nil];
+	  [self stopLoading];		// breaks retain loops
+	  [this->client URLProtocol: self
+		   didFailWithError: e];
+	}
+      else
+	{
+	  NSMutableURLRequest	*r;
+
+	  r = [[this->request mutableCopy] autorelease];
+	  [r setURL: url];
+	  AUTORELEASE(RETAIN(self));
+	  [this->client URLProtocol: self
+	     wasRedirectedToRequest: r
+		   redirectResponse: nil];
+	}
+      if (NO == _isLoading)
+        {
+	  return;	// Loading cancelled
+	}
+      if (nil != this->input)
+	{
+	  return;	// Following redirection
+	}
+      // Fall through to continue original connect.
+    }
+
+  if (0 && this->cachedResponse)
+    {
+    }
+  else
+    {
+      NSURL	*url = [this->request URL];
+      NSString	*name = [url host];
+      NSHost	*host;
+
+      if ([name length] == 0)
+	{
+	  name = @"localhost";
+	}
+      host = [NSHost cachedHostWithName: name];
+      if (host)
+	{
+	  [self _gotHost: host];
+	}
+      else
+	{
+	  NSRunLoop	*loop;
+	  NSArray	*modes;
+
+	  loop = [NSRunLoop currentRunLoop];
+	  modes = [this->sched modes: loop];
+	  if (nil == modes)
+	    {
+	      modes = [NSArray arrayWithObject: NSDefaultRunLoopMode];
+	    }
+	  [NSHost lookupName: name
+		      thread: [NSThread currentThread]
+		      target: self
+		    selector: @selector(_gotHost:)
+		       modes: modes];
+	}
     }
 }
 
@@ -1069,10 +1125,8 @@ typedef struct {
     {
       [this->input setDelegate: nil];
       [this->output setDelegate: nil];
-      [this->input removeFromRunLoop: [NSRunLoop currentRunLoop]
-			     forMode: NSDefaultRunLoopMode];
-      [this->output removeFromRunLoop: [NSRunLoop currentRunLoop]
-			      forMode: NSDefaultRunLoopMode];
+      [this->sched remove: this->input];
+      [this->sched remove: this->output];
       [this->input close];
       [this->output close];
       DESTROY(this->input);
@@ -1123,6 +1177,7 @@ typedef struct {
     {
       _parser = [GSMimeParser new];
       [_parser setIsHttp];
+      [_parser setMultipartAsData: YES];
     }
   wasInHeaders = [_parser isInHeaders];
   d = [NSData dataWithBytes: buffer length: readCount];
@@ -1233,7 +1288,8 @@ typedef struct {
 
               NS_DURING
                 s = [[document headerNamed: @"Location"] value];
-                url = [NSURL URLWithString: s];
+                url = [[NSURL URLWithString: s
+                              relativeToURL: [this->request URL]] absoluteURL];
               NS_HANDLER
                 url = nil;
               NS_ENDHANDLER
@@ -1496,10 +1552,8 @@ typedef struct {
 		}
 	    }
 
-	  [this->input removeFromRunLoop: [NSRunLoop currentRunLoop]
-				 forMode: NSDefaultRunLoopMode];
-	  [this->output removeFromRunLoop: [NSRunLoop currentRunLoop]
-				  forMode: NSDefaultRunLoopMode];
+	  [this->sched remove: this->input];
+	  [this->sched remove: this->output];
 	  if (_shouldClose == YES)
 	    {
 	      [this->input setDelegate: nil];
@@ -1508,6 +1562,7 @@ typedef struct {
 	      [this->output close];
 	      DESTROY(this->input);
 	      DESTROY(this->output);
+	      DESTROY(this->sched);
 	    }
 
 	  /*
@@ -1734,9 +1789,7 @@ typedef struct {
 	      NSLog(@"%@ request sent ... closing", self);
 	    }
 	  [this->output setDelegate: nil];
-	  [this->output removeFromRunLoop:
-	    [NSRunLoop currentRunLoop]
-	    forMode: NSDefaultRunLoopMode];
+	  [this->sched remove: this->output];
 	  [this->output close];
 	  DESTROY(this->output);
 	}
@@ -2039,10 +2092,21 @@ typedef struct {
         }
       [this->input setDelegate: self];
       [this->output setDelegate: self];
-      [this->input scheduleInRunLoop: [NSRunLoop currentRunLoop]
-			     forMode: NSDefaultRunLoopMode];
-      [this->output scheduleInRunLoop: [NSRunLoop currentRunLoop]
-			      forMode: NSDefaultRunLoopMode];
+      if ([this->client respondsToSelector: @selector(_scheduled)])
+	{
+	  /* Get a copy of the run loop scheduling information from connection
+	   */
+	  this->sched = [(GSRunLoopScheduler*)
+	    [this->client performSelector: @selector(_scheduled)] copy];
+	}
+      else
+	{
+	  this->sched = [GSRunLoopScheduler new];
+	  [this->sched scheduleInRunLoop: [NSRunLoop currentRunLoop]
+				 forMode: NSDefaultRunLoopMode];
+	}
+      [this->sched schedule: this->input];
+      [this->sched schedule: this->output];
       // set socket options for ftps requests
       [this->input open];
       [this->output open];
@@ -2055,14 +2119,13 @@ typedef struct {
     {
       [this->input setDelegate: nil];
       [this->output setDelegate: nil];
-      [this->input removeFromRunLoop: [NSRunLoop currentRunLoop]
-			     forMode: NSDefaultRunLoopMode];
-      [this->output removeFromRunLoop: [NSRunLoop currentRunLoop]
-			      forMode: NSDefaultRunLoopMode];
+      [this->sched remove: this->input];
+      [this->sched remove: this->output];
       [this->input close];
       [this->output close];
       DESTROY(this->input);
       DESTROY(this->output);
+      DESTROY(this->sched);
     }
 }
 

@@ -1,3 +1,470 @@
+2026-11-19 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Source/GSTLS.m:
+	When debug is turned on for an individual TLS session, write detailed
+	TLS logs of the handshake for that session.
+
+2026-11-15 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Tools/autogsdoc.m:
+	* Tools/default-styles.css:
+	* Documentation/ReleaseNotes.gsdoc:
+	Initial draft of release notes along with monor gsdoc fixes.
+
+2026-11-06 Daniel Boyd <danieljboyd@icloud.com>
+
+	* Source/NSScanner.m (-scanDouble:): Count integer digits beyond the
+	mantissa's limit, so that an integer longer than 18 digits keeps its
+	magnitude.  -[NSString doubleValue] scans with this method.
+	* Tests/base/NSScanner/scanDoubleLong.m: New test.
+
+2026-11-11 Daniel Boyd <danieljboyd@icloud.com>
+
+	* Source/NSArray.m:
+	* Tests/base/NSArray/concurrent_first_use.m:
+	Set NSMutableArrayClass and GSMutableArrayClass in
+	+[NSMutableArray initialize], as NSMutableDictionary, NSMutableSet and
+	NSMutableOrderedSet do for their classes.  They were set only in
+	+[NSArray initialize], which initializes NSMutableArray before it
+	assigns them, so another thread using NSMutableArray for the first time
+	could get nil, or an abstract NSMutableArray, from +alloc.
+
+2026-11-10 Quin Gillespie <trypsynth@gmail.com>
+
+	* configure.ac:
+	* configure:
+	Leave the user domain's header and library directories out of
+	gnustep-base.pc unless gnustep-base is installed into the user domain.
+	The file recorded the home directory of whoever ran configure, such as
+	/home/runneradmin on a CI machine.
+
+2026-11-09 Frederik Seiffert <frederik@algoriddim.com>
+
+	* Headers/Foundation/NSIndexSet.h:
+	* Source/NSIndexSet.m:
+	* Tests/base/NSIndexSet/passingTest.m:
+	* MISSING:
+	Implement -indexPassingTest:, -indexWithOptions:passingTest:,
+	-indexInRange:options:passingTest:, -indexesPassingTest:,
+	-indexesWithOptions:passingTest: and
+	-indexesInRange:options:passingTest:.
+	Fix -enumerateRangesInRange:options:usingBlock: to clip ranges to the
+	requested range and to skip ranges that do not intersect it, and stop
+	-enumerateIndexesInRange:options:usingBlock: from walking indexes
+	outside the requested range.
+
+2026-11-02 Frederik Seiffert <frederik@algoriddim.com>
+
+	* Headers/Foundation/NSProgress.h:
+	* Headers/GNUstepBase/Additions.h:
+	* Headers/GNUstepBase/NSProgress+GNUstepBase.h:
+	* Source/Additions/GNUmakefile:
+	* Source/Additions/NSProgress+GNUstepBase.m:
+	* Source/DocMakefile:
+	* Source/GNUmakefile:
+	* Source/NSProgress.m:
+	* Tests/base/NSProgress/cancellation.m:
+	* Tests/base/NSProgress/currentProgress.m:
+	* Tests/base/NSProgress/delegate.m:
+	* Tests/base/NSProgress/indeterminate.m:
+	* Tests/base/NSProgress/locking.m:
+	* Tests/base/NSProgress/pausing.m:
+	* Tests/base/NSProgress/properties.m:
+	* Tests/base/NSProgress/units.m:
+	Implement pausing and resuming of NSProgress, including the pausable
+	property and handler getters, and match the behaviour of macOS 26.6.2:
+	- Pausing, resuming and cancellation handlers are called
+	asynchronously on every call, and when set while already paused or
+	cancelled.  Children are paused, resumed and cancelled with their
+	parent, in order, until they finish, and children added to a paused or
+	cancelled parent are paused or cancelled.
+	- A progress finishes when its completed unit count reaches its total,
+	and finished is notified both ways.  A child adds its pending unit
+	count whenever it finishes, its fraction counts when it is added, and
+	adding a child that has a parent raises.
+	- -resignCurrent and -performAsCurrentWithPendingUnitCount:usingBlock:
+	complete the pending unit count if no child used it, and the latter
+	makes the receiver current.  -resignCurrent raises if the receiver is
+	not the current progress.  A child created with
+	+progressWithTotalUnitCount:parent:pendingUnitCount: needs no current
+	parent.
+	- Only a progress created with the current progress as its parent
+	becomes an implicit child, not one created with a nil parent or -init.
+	- KVO observers are only notified of changes, in the order of macOS.
+	The file related properties are stored in userInfo, which reflects
+	later changes, can be used from any thread, cannot be changed directly
+	and notifies the localized descriptions.
+	Fix deadlocks between observed progresses used from several threads:
+	never hold the lock that protects the state while calling out,
+	serialize changes and their notifications with a separate lock, and
+	update the parent and children after the outermost change ends.  Do
+	not leave locks held or lose updates of the parent and children when
+	observers raise, and do not divide by a total unit count of 0.
+	Declare -resume and the resuming handler for macOS 10.11 and later.
+	Add -delegate and -setDelegate: with the GSProgressDelegate protocol
+	as a portable alternative to the cancellation, pausing and resuming
+	handlers, implemented in the additions for macOS, and mark the block
+	based methods as non-portable.
+
+2026-11-05 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Source/GSSocketStream.m:
+	* Source/GSTLS.m:
+	* Source/NSFileHandle.m:
+	* Source/unix/GSRunLoopCtxt.m:
+	* Source/unix/NSStream.m:
+	* Source/win32/NSStream.m:
+	* Tests/base/NSStream/socket.m:
+	* Tests/base/NSURLConnection/addressTLS.m:
+	Implement check for GSTLSServerName erroneously set to an address in
+	the GSTLS session so it deals with all the higher-level code paths.
+	Revert the 'usability' tweak of automatically setting it for streams,
+	so applications need to explicitly set the host name they are opening
+	a TLS stream (or file handle) to.
+	Extend Daniel's testcases to include lower level NSStream tests as
+	well as NSURLConnection/NSURLHandle tests.
+
+2026-11-04 Daniel Boyd <danieljboyd@icloud.com>
+
+	* Source/GSHTTPURLHandle.m:
+	* Source/GSPrivate.h:
+	* Source/GSSocketStream.m:
+	* Source/NSURLProtocol.m:
+	* Tests/base/NSURLConnection/addressTLS.m:
+	* Tests/base/NSURLConnection/addressTLS/:
+	Verify the certificate of an https URL with an address as its host
+	against that address.  Recognise addresses by parsing them rather
+	than by their first character.
+
+2026-10-21 Rupert Daniel <rupert@cancelmonday.com>
+
+	* Source/NSSortDescriptor.m: Copy the comparator block instead of
+	retaining it, so a descriptor created with a stack block does not
+	keep a dangling pointer to the caller's stack frame now that
+	objc_retain() no longer copies stack blocks.
+
+2026-10-07 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Source/Additions/GSMime.m:
+	* Tests/base/GSMime/general.m:
+	Changes to correct encoding of otherwise illegal characters in headers.
+
+2026-10-05 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Headers/Foundation/NSUserDefaults.h:
+	* Source/NSUserDefaults.m:
+	When setting volatile domain we should replace an existing domain.
+	* Source/NSDateFormatter.m:
+	When decoding from archive, properly initialise instance.
+
+2026-09-30 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Headers/Foundation/NSOperation.h:
+	* Headers/GNUstepBase/Additions.h:
+	* Headers/GNUstepBase/GSBoxWeak.h:
+	* Headers/GNUstepBase/GSOperation.h:
+	* Source/Additions/GNUmakefile:
+	* Source/Additions/GSBoxWeak.m:
+	* Source/Additions/GSOperation.m:
+	* Source/DocMakefile:
+	* Source/GNUmakefile:
+	* Source/NSOperation.m:
+	* Tests/base/NSOperation/GSOperation.m:
+	* Tests/base/NSOperation/basic.m:
+	* Tests/base/NSOperation/concurrent.m:
+	* Tests/base/NSOperation/queue_dispatch.m:
+	Changes to fix portability issues with NSOperation and blocks/ARC:
+	Add GSBoxWeak as a convenience to work with zeroing weak references
+	on systems without ARC.  A GSBoxWak instance holds a weak reference
+	and returns either the referenced object (retained and autoreleased)
+	or nil if that object has been deallocated.
+	Adds GSOperation as a portable lightweight alternative to the
+	NSBlockOperation class (avoiding overheads of NSInvocationOperation).
+	Adds -delegate and -setDelegate: methods to NSOperation, to provide
+	a portable alternative to the non-portable Apple completionHandler and
+	-setCompletionHandler: methods.
+	Provides these features in the base additions library so that people
+	using Apple's Foundation can write portable code too.
+	Adds testcases for the delegate methods and the GSOperation class.
+
+2026-09-23 Daniel Boyd <danieljboyd@icloud.com>
+
+	* Source/NSTask.m: Start child processes with an empty signal mask
+	in both the posix_spawn path (POSIX_SPAWN_SETSIGMASK) and the fork
+	fallback, so signals blocked on the launching thread (eg a
+	libdispatch worker blocking SIGTERM) are not inherited and
+	-terminate works.  The parent's mask is unchanged.
+	* Tests/base/NSTask/posix_spawn_signal_mask.m: New regression test.
+
+2026-09-23 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Source/NSRegularExpression.m: Fix tests for ICU success
+	* Tests/base/NSRegularExpression/basic.m: Add some replacement testcases
+	Fixes and tests suggested in issue #800
+
+2026-09-23 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Tools/defaults.m:
+	Add export, import, and merge commands using property lists on
+	stdin and stdout.
+
+2026-09-15 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Source/GNUmakefile:
+	* Source/GSRunLoopScheduler.h:
+	* Source/GSRunLoopScheduler.m:
+	Build new internal utility class for recording scheduling
+	of an object in multiple runloop/mode combinations.
+	* Source/NSURLConnection.m: Use GSRunLoopScheduler to record the
+	schedulign of the connection.
+	* Source/NSURLProtocol.m: Get the scheduling of the owning connection
+	and use it to schedule the streams performing the I/O.
+	* Source/NSUserDefaults.m: Fix memory leaks when resetting defaults
+
+2026-09-10 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Headers/Foundation/NSUserDefaults.h:
+	* Source/NSUserDefaults.m:
+	Posting of NSUserDefaultsDidChangeNotification deferred until the
+	next -synchronize so that it's possible to manipulate defaults
+	locally without interruption by notifications.
+	* Tests/base/NSUserDefaults/general.m:
+	* Tests/base/NSUserDefaults/notifications.m:
+	Update notification tests by calling -synchronize to 'flush' the
+	notification.
+
+2026-09-08 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Headers/Foundation/NSPathUtilities.h:
+	* Source/NSPathUtilities.m:
+	Removed localization of user directories, reverting to OpenStep/OSX
+	behavior by default, but added GSLocalizedUserDirs() to allow an app
+	to list those user directories which are actually localized on disk
+	(ie the physical directory name has been mapped away from the default
+	one built in to the code, and should not be further mapped by UI).
+	* Headers/GNUstepBase/GSVersionMacros.h: Added support for define of
+	GS_SUPPRESS_NON_PORTABLE_CODE_WARNINGS to do just what it says.
+
+2026-09-07 Rupert Daniel <rupert@cancelmonday.com>
+
+        * Headers/GNUstepBase/GSIMap.h: When rehashing a table with strong
+        keys and weak values, hash the stored key rather than the nil key
+        returned by GSIMapWeakIsEmpty(), so entries stay reachable after
+        the table resizes.
+        * Tests/base/NSMapTable/weakGrowth.m: New regression test for
+        lookup, replacement and removal after growth with each combination
+        of strong and weak keys and values.
+
+2026-09-02 Richard Frith-Macdonald <rfm@gnu.org>
+
+        * configure.ac: Add test for eventfd presence on linux and use it
+        rather than a pipe for inter-thread signalling.  This reduces the
+        per-thread resource overhead from two file descriptors (a pipe) to
+        a single one, as well as being more efficient than a pipe.
+        * configure: Regenerate
+        * Headers/GNUstepBase/config.h.in: Regenerate
+        * Source/NSThread.m: Implement optional inter-thread messaging using
+        eventfd (where available) rather than a pipe.
+        * Source/NSRunLoop.m: Use eventfd header if available
+
+2026-08-20  Artyom Shalkhakov  <artyom.shalkhakov@gmail.com>
+
+	* Source/NSPredicate.m: Hand the variadic arguments of
+	[NSExpression+expressionWithFormat:] to the predicate scanner, the
+	way [NSPredicate+predicateWithFormat:] always has, instead of
+	formatting them into the string before parsing it.  A string
+	argument now substitutes for %@ as the constant it is; formatted
+	into the string it would parse as a key path.  The walk which
+	consumes one typed argument per conversion moves to a function the
+	two entry points share.
+	* Tests/base/NSPredicate/functionNames.m: Substitute %@ and %K
+	arguments into expression formats and check what they parse as.
+
+2026-08-20  Artyom Shalkhakov  <artyom.shalkhakov@gmail.com>
+
+	* Source/NSPredicate.m(parseFunctionalExpression): Accept the
+	colon form of a function call OS X writes in format strings, as
+	in "uppercase:(name)"; the colon becomes part of the function
+	name.
+	* Tests/base/NSPredicate/functionNames.m: Test it, and that
+	"now()" parses.
+
+2026-08-20  Artyom Shalkhakov  <artyom.shalkhakov@gmail.com>
+
+	* Source/NSPredicate.m: Implement the uppercase:, lowercase: and
+	now functions of NSExpression, named as OS X names them.
+	* Tests/base/NSPredicate/functionNames.m: Test them.
+
+2026-08-19  Wolfgang Lux  <wolfgang.lux@gmail.com>
+
+	* Source/NSString.m(rangeOfComposedCharacterSequencesForRange:):
+	Add extra guards for the range argument.
+
+2026-08-13 Todd White <todd.white@thalion.global>
+
+	* Source/NSNotificationCenter.m: Post under a lock chosen by the
+	notification name, so that posts of different names do not
+	serialise against each other.  The one table lock becomes an array
+	of stripes which lockNCTable takes in full and in order, so it
+	means what it meant before and every other caller is unchanged.
+	Observations registered with no name get a lock of their own,
+	consulted only where such an observation exists, and the free list
+	shared by the stripes is guarded where it is pushed.
+	* Source/NSUserDefaults.m: Post NSUserDefaultsDidChangeNotification
+	from the methods which alter what a lookup can see and posted
+	nothing: addSuiteNamed:, removeSuiteNamed:, setSearchList:,
+	setVolatileDomain:forName:, removeVolatileDomainForName: and
+	registerDefaults:.
+	* Tests/base/NSUserDefaults/notifications.m: New test that each of
+	those methods posts the notification.
+
+2026-08-14 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Headers/Foundation/NSPathUtilities.h:
+	* Headers/GNUstepBase/config.h.in:
+	* Source/NSBundle.m:
+	* Source/NSPathUtilities.m:
+	* configure:
+	* configure.ac:
+	* standalone.conf:
+	Update to match gnustep-make changes for resource location config.
+	Add path utilitites option GSResourcesDirectory to locate resources
+	stored outside app bundles (use it for tool bundles).
+
+2026-08-12 Todd White <todd.white@thalion.global>
+
+	* Source/NSBundle.m: Let a thread reuse the localization table it
+	was last given for a bundle and table name, holding a retain on
+	that table, so that -localizedStringForKey:value:table: takes the
+	lock every bundle shares only where a table is loaded.  Protect
+	-infoDictionary with the same lock, and take it in
+	-cleanPathCache, which destroyed the information dictionary and
+	the localization tables without it.
+
+2026-08-12 Todd White <todd.white@thalion.global>
+
+	* Source/NSNotificationCenter.m: Take the table lock for the
+	cleanup of the array of observations only when the post put
+	something in it.  The array is local to the call, so its count
+	may be read without the lock.
+
+2026-08-12 Todd White <todd.white@thalion.global>
+
+	* Source/NSMethodSignature.m:
+	* Source/GSInvocation.h:
+	* Source/NSDistantObject.m:
+	* Source/NSInvocation.m: Answer a set of types that has been seen
+	before from a table read without the cache lock, and keep a
+	cached signature for the life of the process rather than counting
+	references to it, which is what the cache already does.  Limit how
+	many sets of types may be cached, answering an uncached signature
+	past the limit rather than failing, and use an uncached signature
+	for types which came from a connection or an archive, so that a
+	peer cannot fill the cache.
+
+2026-08-11 Todd White <todd.white@thalion.global>
+
+	* Source/NSKeyValueCoding+Caching.m: Let each thread keep the
+	slots it has most recently used, so that valueForKey: reads the
+	shared table, and takes its lock, only for a class and key that
+	thread has not seen.  A slot is added to the shared table once
+	and never removed, so a pointer to one stays valid.
+
+2026-08-11 Todd White <todd.white@thalion.global>
+
+	* Source/NSString.m: Answer a copy from +stringWithString:
+	rather than allocating a string and initialising it from the
+	argument, so that a string which may be shared is shared.  A
+	subclass keeps the earlier path.
+	* Source/NSCalendarDate.m: Read the second that GSPrivateTimeNow
+	records before writing it, and write it only when it has
+	changed, so that every thread asking for the time does not
+	dirty the line it sits in.  The read and the write are relaxed
+	atomic operations.
+
+2026-08-10 Todd White <todd.white@thalion.global>
+
+	* Source/NSProcessInfo.m:
+	* Tests/base/NSProcessInfo/initialise.m:
+	Use the process environment when a process is initialised without
+	one, and pass the environment given to
+	GSInitializeProcessAndroidWithArgs() on to the initialisation.
+	* Source/NSBundle.m:
+	* Tests/base/NSTask/nopath.m:
+	Do not loop forever looking for an executable when the environment
+	has no PATH.
+
+2026-08-06 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Headers/GNUstepBase/NSData+GNUstepBase.h:
+	* Source/Additions/NSData+GNUstepBase.m:
+	New method to more efficiently get randomness.
+
+2026-07-28 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Headers/Foundation/NSRunLoop.h:
+	* Headers/Foundation/NSTimer.h:
+	* Headers/GNUstepBase/GSIArray.h:
+	* Headers/GNUstepBase/GSMinHeap.h:
+	* Source/Additions/GSMinHeap.m:
+	* Source/GNUmakefile:
+	* Source/GSRunLoopCtxt.h:
+	* Source/GSRunLoopCtxt.m:
+	* Source/NSRunLoop.m:
+	* Source/NSTimer.m:
+	* Source/unix/GSRunLoopCtxt.m:
+	* Source/win32/GSRunLoopCtxt.m:
+	Change to use a min heap rather than an array of timers in each runloop
+	context.  This was done after testing three different timer
+	implementations to confirm that the theoretical benefits were seen in
+	practice (and that any slight overhead in the common case of a very
+	lightly loaded loop was negligible).  This also contains a change to
+	the way that timers are recorded in different run loop modes to improve
+	performance when firing and to iomprove lookup on every iteration.
+	The limitation of the new impelementation is that a run loop is limited
+	to having no more than 64 modes (adding to a 65th mode will raise an
+	exception), but this seems academic since programs typically operate
+	using only one to four modes anyway.
+
+2026-07-28 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Source/NSPathUtilities.m: Add support for XDG user directories.
+	* Tests/base/NSPathUtilities/userDomain.m: Add some user domain tests.
+	Adds support for XDG well known user directory definitions configured
+	in the .config/user-dirs.dirs file.  If present, these are used
+	unless overridden by similar configuration in the GNUstep config file.
+	Default values are still hard coded, so we operate normally if neither
+	config file lists a value.
+	The XDG configurations are XDG_DESKTOP_DIR XDG_DOCUMENTS_DIR
+	XDG_DOWNLOAD_DIR XDG_MUSIC_DIR XDG_PICTURES_DIR XDG_PROJECTS_DIR
+	XDG_PUBLICSHARE_DIR XDG_TEMPLATES_DIR XDG_VIDEOS_DIR
+	and the corresponding keys in the GNUstep config are
+	GNUSTEP_DESKTOP_DIR GNUSTEP_DOCUMENTS_DIR GNUSTEP_DOWNLOAD_DIR
+	GNUSTEP_MUSIC_DIR GNUSTEP_PICTURES_DIR GNUSTEP_PROJECTS_DIR
+	GNUSTEP_PUBLICSHARE_DIR GNUSTEP_TEMPLATES_DIR GNUSTEP_VIDEOS_DIR
+	The TEMPLATES and PROJECTS settings are currently unused.
+
+2026-07-27 Todd White <todd.white@thalion.global>
+
+	* Source/NSUnarchiver.m: Decode a char archived value into a wider
+	integer destination (short/int/long/long long), preserving the sign
+	of the archived char.  BOOL is a char on most platforms but an int
+	with the libobjc2 runtime on Windows, so a gorm (which encodes BOOL
+	as unsigned char) failed to load there with "expected int and got
+	unsigned char".  See gnustep/libs-gui#318 and gnustep/libs-gui#405.
+	* Tests/base/NSArchiver/charWidening.m: Test the char to integer
+	widening.
+
+2026-07-27 Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Headers/GNUstepBase/GSIMap.h:
+	* Source/NSConcreteHashTable.m:
+	* Source/NSConcreteMapTable.m:
+	* Tests/base/NSHashTable/weakObjects.m:
+	Weak pointer enumeration fixes and performance improvements.  We get
+	retained values (and explicitly release them) rather than depending
+	on autorelease pools in many more places.
+
 2026-07-21 Richard Frith-Macdonald <rfm@gnu.org>
 
 	* Headers/Foundation/NSZone.h: Remove old garbage collection

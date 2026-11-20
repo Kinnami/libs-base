@@ -318,17 +318,26 @@ GSPrivateTimeNow(void)
  * system time to make sure we don't have a temporary glitch.
  */
 {
+  /* One value shared by every thread that asks for the time.  It is read
+   * before it is written, and written only when the second it holds has
+   * changed, so the line it sits in stays clean between one second and the
+   * next.
+   */
   static int	old = 0;
+  int		prev = __atomic_load_n(&old, __ATOMIC_RELAXED);
 
-  if (old == 0)
+  if (prev == 0)
     {
-      old = tp.tv_sec;
+      __atomic_store_n(&old, (int)tp.tv_sec, __ATOMIC_RELAXED);
     }
   else
     {
-      int	diff = tp.tv_sec - old;
+      int	diff = tp.tv_sec - prev;
 
-      old = tp.tv_sec;
+      if (prev != (int)tp.tv_sec)
+	{
+	  __atomic_store_n(&old, (int)tp.tv_sec, __ATOMIC_RELAXED);
+	}
       if (diff < -1 || diff > 3000)
 	{
 	  time_t	now = (time_t)tp.tv_sec;
@@ -550,7 +559,8 @@ GSPrivateTimeNow(void)
  * read up to the specified number of characters, terminating at a non-digit
  * except for leading whitespace characters.
  */
-static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
+static inline int getDigits(const uint8_t *from, uint8_t *to,
+  int limit, BOOL *error)
 {
   int	i = 0;
   int	j = 0;
@@ -716,7 +726,7 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
   BOOL		isPM = NO;
   BOOL		twelveHrClock = NO;
   int		julianWeeks = -1, weekStartsMonday = 0, dayOfWeek = -1;
-  const char	*source;
+  const uint8_t	*source;
   unsigned	sourceLen;
   unichar	*format;
   unsigned	formatLen;
@@ -736,8 +746,8 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
     {
       description = @"";
     }
-  source = [description cString];
-  sourceLen = strlen(source);
+  source = (const uint8_t*)[description cString];
+  sourceLen = strlen((const char*)source);
   if (fmt == nil)
     {
       fmt = [LOCALE objectForKey: NSTimeDateFormatString];
@@ -1132,8 +1142,8 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 
 		  case 'd': // fall through
 		  case 'e':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 2, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 2, &error);
 		    day = atoi(tmpStr);
 		    had |= hadD;
 		    if (error == NO && day < 1)
@@ -1144,8 +1154,8 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 		    break;
 
 		  case 'F':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 3, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 3, &error);
 		    milliseconds = atoi(tmpStr);
 		    break;
 
@@ -1161,22 +1171,22 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 		  case 'I': // fall through
 		    twelveHrClock = YES;
 		  case 'H':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 2, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 2, &error);
 		    hour = atoi(tmpStr);
 		    had |= hadh;
 		    break;
 
 		  case 'j':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 3, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 3, &error);
 		    day = atoi(tmpStr);
 		    had |= hadD;
 		    break;
 
 		  case 'm':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 2, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 2, &error);
 		    month = atoi(tmpStr);
 		    had |= hadM;
 		    if (error == NO && month < 1)
@@ -1187,8 +1197,8 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 		    break;
 
 		  case 'M':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 2, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 2, &error);
 		    min = atoi(tmpStr);
 		    had |= hadm;
 		    break;
@@ -1233,15 +1243,15 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 		    break;
 
 		  case 'S':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 2, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 2, &error);
 		    sec = atoi(tmpStr);
 		    had |= hads;
 		    break;
 
 		  case 'w':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 1, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 1, &error);
 		    dayOfWeek = atoi(tmpStr);
 		    had |= hadw;
 		    break;
@@ -1249,8 +1259,8 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 		  case 'W': // Fall through
 		    weekStartsMonday = 1;
 		  case 'U':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 1, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 1, &error);
 		    julianWeeks = atoi(tmpStr);
 		    break;
 
@@ -1261,8 +1271,8 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 		    //	break;
 
 		  case 'y':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 2, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 2, &error);
 		    year = atoi(tmpStr);
 		    if (year >= 70)
 		      {
@@ -1276,8 +1286,8 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 		    break;
 
 		  case 'Y':
-		    sourceIdx
-		      += getDigits(&source[sourceIdx], tmpStr, 4, &error);
+		    sourceIdx += getDigits(&source[sourceIdx],
+		      (uint8_t*)tmpStr, 4, &error);
 		    year = atoi(tmpStr);
 		    had |= hadY;
 		    break;
@@ -1297,7 +1307,8 @@ static inline int getDigits(const char *from, char *to, int limit, BOOL *error)
 			  sign = -1;
 			  sourceIdx++;
 			}
-		      found = getDigits(&source[sourceIdx], tmpStr, 4, &error);
+		      found = getDigits(&source[sourceIdx],
+			(uint8_t*)tmpStr, 4, &error);
 		      if (found > 0)
 			{
 			  sourceIdx += found;

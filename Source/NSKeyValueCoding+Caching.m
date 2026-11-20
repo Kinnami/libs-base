@@ -72,7 +72,7 @@ _KVCCacheSlotEqual(const void *ptr1, const void *ptr2)
   return a->cls == b->cls && a->hash == b->hash;
 }
 
-void inline _KVCCacheSlotRelease(const void *ptr)
+static void inline _KVCCacheSlotRelease(const void *ptr)
 {
   free((struct _KVCCacheSlot *) ptr);
 }
@@ -86,6 +86,31 @@ void inline _KVCCacheSlotRelease(const void *ptr)
 #define GSI_MAP_KTYPES GSUNION_PTR
 #import "GNUstepBase/GSIMap.h"
 #import "GSPThread.h"
+
+/* A slot is added to the shared table once and never removed from it, so a
+ * pointer to one stays valid for the life of the process and each thread can
+ * keep a few of them to itself.  A thread that finds the slot it wants here
+ * reads nothing the other threads write.
+ */
+#define KVC_THREAD_CACHE_SIZE 8
+
+struct _KVCThreadCache
+{
+  struct _KVCCacheSlot *slots[KVC_THREAD_CACHE_SIZE];
+};
+
+static gs_thread_key_t  kvcThreadCacheKey;
+/* Read without the lock and written under it, so the flag is reached through
+ * atomic operations.  The release pairs with the acquire below, which is what
+ * publishes the key itself to a thread that finds the flag set.
+ */
+static BOOL             kvcThreadCacheKeyReady = NO;
+
+static void
+_KVCThreadCacheFree(void *cache)
+{
+  free(cache);
+}
 
 /*
  * Templating for poor people:
@@ -481,7 +506,7 @@ ValueForKeyLookup(Class cls, NSObject *self, NSString *boxedKey,
   memcpy(&buf[4], key, size);
   buf[size + 4] = '\0';
   lo = buf[4];
-  hi = islower(lo) ? toupper(lo) : lo;
+  hi = islower((uint8_t)lo) ? toupper((uint8_t)lo) : lo;
   buf[4] = hi;
 
   // 1.1 Check if the _get<key> accessor method exists
@@ -578,15 +603,44 @@ valueForKeyWithCaching(id obj, NSString *aKey)
   static GSIMapTable_t  cacheTable = {};
   static gs_mutex_t     cacheTableLock = GS_MUTEX_INIT_STATIC;
 
+  struct _KVCThreadCache *threadCache = NULL;
+  unsigned int           threadCacheIndex = 0;
+
   Class cls = object_getClass(obj);
   // Fill out the required fields for hashing
   struct _KVCCacheSlot slot = {.cls = cls, .hash = [aKey hash]};
+
+  if (__atomic_load_n(&kvcThreadCacheKeyReady, __ATOMIC_ACQUIRE))
+    {
+      threadCache = GS_THREAD_KEY_GET(kvcThreadCacheKey);
+      threadCacheIndex = (unsigned int)
+        (((uintptr_t) cls ^ (uintptr_t) slot.hash) % KVC_THREAD_CACHE_SIZE);
+      if (threadCache != NULL)
+        {
+          cachedSlot = threadCache->slots[threadCacheIndex];
+          if (cachedSlot != NULL
+            && cachedSlot->cls == cls
+            && cachedSlot->hash == slot.hash
+            && cachedSlot->version == objc_method_cache_version)
+            {
+              return cachedSlot->get(cachedSlot, obj);
+            }
+          cachedSlot = NULL;
+        }
+    }
 
   GS_MUTEX_LOCK(cacheTableLock);
   if (cacheTable.zone == 0)
     {
       // TODO: Tweak initial capacity
       GSIMapInitWithZoneAndCapacity(&cacheTable, NSDefaultMallocZone(), 64);
+    }
+  if (!__atomic_load_n(&kvcThreadCacheKeyReady, __ATOMIC_RELAXED))
+    {
+      if (GS_THREAD_KEY_INIT(kvcThreadCacheKey, _KVCThreadCacheFree))
+        {
+          __atomic_store_n(&kvcThreadCacheKeyReady, YES, __ATOMIC_RELEASE);
+        }
     }
   node = GSIMapNodeForKey(&cacheTable, (GSIMapKey) (void *) &slot);
   GS_MUTEX_UNLOCK(cacheTableLock);
@@ -627,11 +681,41 @@ valueForKeyWithCaching(id obj, NSString *aKey)
       // as it is unlikely, that the return type has changed.
       slot
         = ValueForKeyLookup(cls, obj, aKey, [aKey UTF8String], [aKey length]);
+      if (slot.contents == 0)
+        {
+          return [obj valueForUndefinedKey: aKey];
+        }
+      /* The lookup leaves the key fields empty; keep the entry findable
+       * under the class and key it is stored under in the table. */
+      slot.cls = cachedSlot->cls;
+      slot.hash = cachedSlot->hash;
 
       // Update entry
       GS_MUTEX_LOCK(cacheTableLock);
       memcpy(cachedSlot, &slot, sizeof(struct _KVCCacheSlot));
       GS_MUTEX_UNLOCK(cacheTableLock);
+    }
+
+  if (__atomic_load_n(&kvcThreadCacheKeyReady, __ATOMIC_ACQUIRE))
+    {
+      if (threadCache == NULL)
+        {
+          threadCache = GS_THREAD_KEY_GET(kvcThreadCacheKey);
+          if (threadCache == NULL)
+            {
+              threadCache = calloc(1, sizeof(struct _KVCThreadCache));
+              if (threadCache != NULL)
+                {
+                  GS_THREAD_KEY_SET(kvcThreadCacheKey, threadCache);
+                }
+            }
+          threadCacheIndex = (unsigned int)
+            (((uintptr_t) cls ^ (uintptr_t) slot.hash) % KVC_THREAD_CACHE_SIZE);
+        }
+      if (threadCache != NULL)
+        {
+          threadCache->slots[threadCacheIndex] = cachedSlot;
+        }
     }
 
   return cachedSlot->get(cachedSlot, obj);

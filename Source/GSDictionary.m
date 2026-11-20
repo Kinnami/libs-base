@@ -76,6 +76,7 @@
 
 @implementation GSDictionary
 
+static SEL	eqSel;
 static SEL	nxtSel;
 static SEL	objSel;
 
@@ -99,6 +100,7 @@ static SEL	objSel;
 {
   if (self == [GSDictionary class])
     {
+      eqSel = @selector(isEqual:);
       nxtSel = @selector(nextObject);
       objSel = @selector(objectForKey:);
     }
@@ -145,6 +147,61 @@ static SEL	objSel;
     }
 }
 
+- (void) getObjects: (__unsafe_unretained id[])objects
+            andKeys: (__unsafe_unretained id[])keys
+	      count: (NSUInteger)max
+{
+  NSUInteger		i = 0;
+  GSIMapEnumerator_t	enumerator = GSIMapEnumeratorForMap(&map);
+  GSIMapNode		node = GSIMapEnumeratorNextNode(&enumerator);
+
+  if (NULL == objects)
+    {
+      if (NULL == keys)
+	{
+	  return;
+	}
+      while (node && i < max)
+	{
+	  keys[i++] = node->key.obj;
+	  node = GSIMapEnumeratorNextNode(&enumerator);
+	}
+      while (i < max)
+	{
+	  keys[i++] = nil;
+	}
+    }
+  else
+    {
+      if (NULL == keys)
+	{
+	  while (node && i < max)
+	    {
+	      objects[i++] = node->value.obj;
+	      node = GSIMapEnumeratorNextNode(&enumerator);
+	    }
+	  while (i < max)
+	    {
+	      objects[i++] = nil;
+	    }
+	}
+      else
+	{
+	  while (node && i < max)
+	    {
+	      keys[i] = node->key.obj;
+	      objects[i++] = node->value.obj;
+	      node = GSIMapEnumeratorNextNode(&enumerator);
+	    }
+	  while (i < max)
+	    {
+	      keys[i] = nil;
+	      objects[i++] = nil;
+	    }
+	}
+    }
+}
+
 - (NSUInteger) hash
 {
   return map.nodeCount;
@@ -161,7 +218,7 @@ static SEL	objSel;
     {
       self = [super initWithCoder: aCoder];
     }
-  else
+  else if (nil != (self = [super init]))
     {
       unsigned	count;
       id		key;
@@ -189,36 +246,39 @@ static SEL	objSel;
                forKeys: (const id <NSCopying>[])keys
                  count: (NSUInteger)c
 {
-  NSUInteger	i;
-
-  GSIMapInitWithZoneAndCapacity(&map, [self zone], c);
-  for (i = 0; i < c; i++)
+  if (nil != (self = [super init]))
     {
-      GSIMapNode	node;
+      NSUInteger	i;
 
-      if (keys[i] == nil)
+      GSIMapInitWithZoneAndCapacity(&map, [self zone], c);
+      for (i = 0; i < c; i++)
 	{
-	  DESTROY(self);
-	  [NSException raise: NSInvalidArgumentException
-		      format: @"Tried to init dictionary with nil key"];
-	}
-      if (objs[i] == nil)
-	{
-	  DESTROY(self);
-	  [NSException raise: NSInvalidArgumentException
-		      format: @"Tried to init dictionary with nil value"];
-	}
+	  GSIMapNode	node;
 
-      node = GSIMapNodeForKey(&map, (GSIMapKey)(id)keys[i]);
-      if (node)
-	{
-	  IF_NO_ARC(RETAIN(objs[i]);)
-	  RELEASE(node->value.obj);
-	  node->value.obj = objs[i];
-	}
-      else
-	{
-	  GSIMapAddPair(&map, (GSIMapKey)(id)keys[i], (GSIMapVal)objs[i]);
+	  if (keys[i] == nil)
+	    {
+	      DESTROY(self);
+	      [NSException raise: NSInvalidArgumentException
+			  format: @"Tried to init dictionary with nil key"];
+	    }
+	  if (objs[i] == nil)
+	    {
+	      DESTROY(self);
+	      [NSException raise: NSInvalidArgumentException
+			  format: @"Tried to init dictionary with nil value"];
+	    }
+
+	  node = GSIMapNodeForKey(&map, (GSIMapKey)(id)keys[i]);
+	  if (node)
+	    {
+	      IF_NO_ARC(RETAIN(objs[i]);)
+	      RELEASE(node->value.obj);
+	      node->value.obj = objs[i];
+	    }
+	  else
+	    {
+	      GSIMapAddPair(&map, (GSIMapKey)(id)keys[i], (GSIMapVal)objs[i]);
+	    }
 	}
     }
   return self;
@@ -230,57 +290,60 @@ static SEL	objSel;
 - (id) initWithDictionary: (NSDictionary*)other
 		copyItems: (BOOL)shouldCopy
 {
-  NSZone	*z = [self zone];
-  NSUInteger	c = [other count];
-
-  GSIMapInitWithZoneAndCapacity(&map, z, c);
-  if (nil == other || other == self)
+  if (nil != (self = [super init]))
     {
-      return self;
-    }
-  if (c > 0)
-    {
-      NSEnumerator	*e = [other keyEnumerator];
-      IMP		nxtObj = [e methodForSelector: nxtSel];
-      IMP		otherObj = [other methodForSelector: objSel];
-      BOOL		isProxy = [other isProxy];
-      NSUInteger	i;
+      NSZone		*z = [self zone];
+      NSUInteger	c = [other count];
 
-      for (i = 0; i < c; i++)
+      GSIMapInitWithZoneAndCapacity(&map, z, c);
+      if (nil == other || other == self)
 	{
-	  GSIMapNode	node;
-	  id		k;
-	  id		o;
+	  return self;
+	}
+      if (c > 0)
+	{
+	  NSEnumerator	*e = [other keyEnumerator];
+	  IMP		nxtObj = [e methodForSelector: nxtSel];
+	  IMP		otherObj = [other methodForSelector: objSel];
+	  BOOL		isProxy = [other isProxy];
+	  NSUInteger	i;
 
-	  if (isProxy == YES)
+	  for (i = 0; i < c; i++)
 	    {
-	      if (nil == (k = [e nextObject])) break;
-	      o = [other objectForKey: k];
-	    }
-	  else
-	    {
-	      if (nil == (k = (*nxtObj)(e, nxtSel))) break;
-	      o = (*otherObj)(other, objSel, k);
-	    }
-	  if (shouldCopy)
-	    {
-	      o = [o copyWithZone: z];
-	    }
-	  else
-	    {
-	      o = RETAIN(o);
-	    }
+	      GSIMapNode	node;
+	      id		k;
+	      id		o;
 
-	  node = GSIMapNodeForKey(&map, (GSIMapKey)k);
-	  if (node)
-	    {
-	      RELEASE(node->value.obj);
-	      node->value.obj = o;
-	    }
-	  else
-	    {
-	      GSIMapAddPair(&map, (GSIMapKey)k, (GSIMapVal)o);
-	      RELEASE(o);
+	      if (isProxy == YES)
+		{
+		  if (nil == (k = [e nextObject])) break;
+		  o = [other objectForKey: k];
+		}
+	      else
+		{
+		  if (nil == (k = (*nxtObj)(e, nxtSel))) break;
+		  o = (*otherObj)(other, objSel, k);
+		}
+	      if (shouldCopy)
+		{
+		  o = [o copyWithZone: z];
+		}
+	      else
+		{
+		  o = RETAIN(o);
+		}
+
+	      node = GSIMapNodeForKey(&map, (GSIMapKey)k);
+	      if (node)
+		{
+		  RELEASE(node->value.obj);
+		  node->value.obj = o;
+		}
+	      else
+		{
+		  GSIMapAddPair(&map, (GSIMapKey)k, (GSIMapVal)o);
+		  RELEASE(o);
+		}
 	    }
 	}
     }
@@ -300,9 +363,12 @@ static SEL	objSel;
     {
       if (count > 0)
 	{
+	  /* We assume that the other dictionary has optimised lookup so that
+	   * finding an object matching our key is as efficient as possible.
+	   */
+	  IMP			otherObj = [other methodForSelector: objSel];
 	  GSIMapEnumerator_t	enumerator;
 	  GSIMapNode		node;
-	  IMP			otherObj = [other methodForSelector: objSel];
 
 	  enumerator = GSIMapEnumeratorForMap(&map);
 	  while ((node = GSIMapEnumeratorNextNode(&enumerator)) != 0)
@@ -310,7 +376,7 @@ static SEL	objSel;
 	      id o1 = node->value.obj;
 	      id o2 = (*otherObj)(other, objSel, node->key.obj);
 
-	      if (o1 != o2 && [o1 isEqual: o2] == NO)
+	      if (nil == o2 || NO == [o1 isEqual: o2])
 		{
 		  GSIMapEndEnumerator(&enumerator);
 		  return NO;
@@ -397,7 +463,10 @@ static SEL	objSel;
 /* Designated initialiser */
 - (id) initWithCapacity: (NSUInteger)cap
 {
-  GSIMapInitWithZoneAndCapacity(&map, [self zone], cap);
+  if (nil != (self = [super init]))
+    {
+      GSIMapInitWithZoneAndCapacity(&map, [self zone], cap);
+    }
   return self;
 }
 

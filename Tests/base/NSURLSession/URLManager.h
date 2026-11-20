@@ -1,15 +1,18 @@
 #import <Foundation/NSURLSession.h>
 #import <Foundation/NSData.h>
+#import <GNUstepBase/GSBlocks.h>
 
 @class URLManager;
 
-typedef void (^URLManagerCheckBlock)(URLManager *);
+DEFINE_BLOCK_TYPE(URLManagerCheckBlock, void, URLManager *);
 
 @interface URLManager
   : NSObject <NSURLSessionDataDelegate, NSURLSessionTaskDelegate,
               NSURLSessionDelegate, NSURLSessionDownloadDelegate>
 {
   URLManagerCheckBlock _checkBlock;
+  id                   _checkTarget;
+  SEL                  _checkSelector;
 
 @public
   NSURLSession                   *currentSession;
@@ -55,6 +58,11 @@ typedef void (^URLManagerCheckBlock)(URLManager *);
 
 - (void)setCheckBlock:(URLManagerCheckBlock)block;
 
+/* The check to run once the expected number of tasks has completed, stated
+ * without a block.  aSelector takes the URLManager.
+ */
+- (void)setCheckTarget:(id)target selector:(SEL)aSelector;
+
 @end
 
 @implementation URLManager
@@ -71,18 +79,65 @@ typedef void (^URLManagerCheckBlock)(URLManager *);
   return self;
 }
 
-- (void)setCheckBlock:(URLManagerCheckBlock)block
+- (void) empty
 {
-  _checkBlock = _Block_copy(block);
+  DESTROY(currentSession);
+
+  DESTROY(didCreateTask);
+  DESTROY(didBecomeInvalidError);
+
+  DESTROY(httpRedirectionTask);
+  DESTROY(httpRedirectionResponse);
+  DESTROY(httpRedirectionRequest);
+
+  DESTROY(didCompleteTask);
+  DESTROY(didCompleteError);
+
+  DESTROY(didWriteDataTask);
+
+  DESTROY(didFinishDownloadingTask);
+  DESTROY(didFinishDownloadingURL);
+
+  DESTROY(didReceiveResponseTask);
+  DESTROY(didReceiveResponse);
+
+  DESTROY(didReceiveDataTask);
+  DESTROY(accumulatedData);
+
+  DESTROY(_checkTarget);
+  if (NULL != _checkBlock)
+    {
+      Block_release(_checkBlock);
+      _checkBlock = NULL;
+    }
 }
 
-#pragma mark - Session Lifecycle
+- (void) invalidate
+{
+  [currentSession invalidateAndCancel];
+}
+
+- (void)setCheckBlock:(URLManagerCheckBlock)block
+{
+  if (NULL != block)
+    {
+      _checkBlock = Block_copy(block);
+    }
+}
+
+- (void)setCheckTarget:(id)target selector:(SEL)aSelector
+{
+  /* The check runs later, from a delegate callback, so the target is held. */
+  ASSIGN(_checkTarget, target);
+  _checkSelector = aSelector;
+}
+
+/* Session Lifecycle */
 
 - (void)URLSession:(NSURLSession *)session
      didCreateTask:(NSURLSessionTask *)task
 {
   ASSIGN(currentSession, session);
-
   didCreateTaskCount += 1;
   ASSIGN(didCreateTask, task);
 }
@@ -95,13 +150,12 @@ typedef void (^URLManagerCheckBlock)(URLManager *);
   didBecomeInvalidCount += 1;
 }
 
-#pragma mark - Task Updates
+/* Task Updates */
 
 - (void)URLSession:(NSURLSession *)session
-                        task:(NSURLSessionTask *)task
-  willPerformHTTPRedirection:(NSHTTPURLResponse *)response
-                  newRequest:(NSURLRequest *)request
-           completionHandler:(void (^)(NSURLRequest *))completionHandler
+                    task:(NSURLSessionTask *)task
+  willRedirectToResponse:(NSHTTPURLResponse *)response
+              newRequest:(NSURLRequest *)request
 {
   ASSIGN(currentSession, session);
   ASSIGN(httpRedirectionTask, task);
@@ -110,11 +164,11 @@ typedef void (^URLManagerCheckBlock)(URLManager *);
 
   if (cancelRedirect)
     {
-      completionHandler(NULL);
+      [task resumeWithRedirectRequest:nil];
     }
   else
     {
-      completionHandler(request);
+      [task resumeWithRedirectRequest:request];
     }
 
   httpRedirectionCount += 1;
@@ -122,27 +176,31 @@ typedef void (^URLManagerCheckBlock)(URLManager *);
 
 - (void)URLSession:(NSURLSession *)session
                   task:(NSURLSessionTask *)task
-  didCompleteWithError:(nullable NSError *)error
+  didCompleteWithError:(NSError * _Nullable)error
 {
   ASSIGN(currentSession, session);
   ASSIGN(didCompleteTask, task);
   ASSIGN(didCompleteError, error);
 
   didCompleteCount += 1;
-  if (didCompleteCount == numberOfExpectedTasksBeforeCheck
-      && _checkBlock != NULL)
+  if (didCompleteCount == numberOfExpectedTasksBeforeCheck)
     {
-      _checkBlock(self);
+      if (nil != _checkTarget)
+        {
+          [_checkTarget performSelector:_checkSelector withObject:self];
+        }
+      else
+        {
+          CALL_BLOCK(_checkBlock, self);
+        }
     }
 }
 
-#pragma mark - Data Updates
+/* Data Updates */
 
 - (void)URLSession:(NSURLSession *)session
             dataTask:(NSURLSessionDataTask *)dataTask
   didReceiveResponse:(NSURLResponse *)response
-   completionHandler:
-     (void (^)(NSURLSessionResponseDisposition))completionHandler
 {
   ASSIGN(currentSession, session);
   ASSIGN(didReceiveResponseTask, dataTask);
@@ -150,7 +208,7 @@ typedef void (^URLManagerCheckBlock)(URLManager *);
 
   didReceiveResponseCount += 1;
 
-  completionHandler(responseAnswer);
+  [dataTask resumeWithResponseDisposition:responseAnswer];
 }
 
 - (void)URLSession:(NSURLSession *)session
@@ -165,7 +223,7 @@ typedef void (^URLManagerCheckBlock)(URLManager *);
   [accumulatedData appendData:data];
 }
 
-#pragma mark - Download Updates
+/* Download Updates */
 
 - (void)URLSession:(NSURLSession *)session
                downloadTask:(NSURLSessionDownloadTask *)downloadTask
@@ -192,33 +250,10 @@ typedef void (^URLManagerCheckBlock)(URLManager *);
   didFinishDownloadingCount += 1;
 }
 
-- (void)dealloc
+- (void) dealloc
 {
-  RELEASE(currentSession);
-
-  RELEASE(didCreateTask);
-  RELEASE(didBecomeInvalidError);
-
-  RELEASE(httpRedirectionTask);
-  RELEASE(httpRedirectionResponse);
-  RELEASE(httpRedirectionRequest);
-
-  RELEASE(didCompleteTask);
-  RELEASE(didCompleteError);
-
-  RELEASE(didWriteDataTask);
-
-  RELEASE(didFinishDownloadingTask);
-  RELEASE(didFinishDownloadingURL);
-
-  RELEASE(didReceiveResponseTask);
-  RELEASE(didReceiveResponse);
-
-  RELEASE(didReceiveDataTask);
-  RELEASE(accumulatedData);
-
-  _Block_release(_checkBlock);
-  [super dealloc];
+  [self empty];
+  DEALLOC
 }
 
 @end

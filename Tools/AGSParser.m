@@ -36,11 +36,11 @@
 #import "Foundation/NSSet.h"
 #import "Foundation/NSTimeZone.h"
 #import "Foundation/NSValue.h"
-#import "Foundation/NSXMLParser.h"
-#import "AGSParser.h"
-#import "AGSOutput.h"
+#import "GNUstepBase/GSStandaloneXMLParser.h"
 #import "GNUstepBase/NSString+GNUstepBase.h"
 #import "GNUstepBase/NSMutableString+GNUstepBase.h"
+#import "AGSParser.h"
+#import "AGSOutput.h"
 
 #define	STARTBRACE	0x7B	// '{' character
 #define	ENDBRACE	0x7D	// '}' character
@@ -99,10 +99,47 @@ static NSDictionary	*permittedIn = nil;
 static NSString *
 concreteType(NSString *t)
 {
+  static NSSet		*unused = nil;
   static NSString	*gClass = @"GS_GENERIC_CLASS";
   static NSString	*gType = @"GS_GENERIC_TYPE";
-  NSMutableString	*m = nil;
+  NSMutableString	*m = AUTORELEASE([t mutableCopy]);
   NSRange		r;
+
+  t = m;
+  /* Remove certain keywords that aren't really type declaration
+   */
+  if (nil == unused)
+    {
+      unused = [[NSMutableSet alloc] initWithObjects:
+	@"_Nullable", @"_Nonnull", @"nullable", @"nonnull", nil];
+    }
+  GS_FOR_IN(NSString*, key, unused)
+    r = [t rangeOfString: key];
+    if (r.length > 0)
+      {
+	if (0 == r.location)
+	  {
+	    if (NSMaxRange(r) < [t length]
+	      && isspace([t characterAtIndex: NSMaxRange(r)]))
+	      {
+		r.length++;
+	      }
+	  }
+	else if ((NSMaxRange(r) == [t length]
+	  || isspace([t characterAtIndex: NSMaxRange(r)]))
+	  && isspace([t characterAtIndex: r.location - 1]))
+	  {
+	    r.location--;
+	    r.length++;
+	  }
+	[m replaceCharactersInRange: r withString: @""];
+      }
+  GS_END_FOR(unused)
+
+  [m replaceString: @" [" withString: @"["];
+  [m replaceString: @"[ " withString: @"["];
+  [m replaceString: @" *" withString: @"*"];
+  [m replaceString: @"**" withString: @"*"];
 
   r = [t rangeOfString: gClass];
   while (r.length > 0)
@@ -111,10 +148,6 @@ concreteType(NSString *t)
       unsigned		len;
       unsigned		pos;
 
-      if (t != m)
-	{
-	  t = m = AUTORELEASE([t mutableCopy]);
-	}
       r = NSMakeRange(0, [gClass length]);
       [m deleteCharactersInRange: r];
       len = [m length];
@@ -230,14 +263,6 @@ concreteType(NSString *t)
       r = [t rangeOfString: gType];
     }
 
-  if ([t hasPrefix: @"nullable "])
-    {
-      if (t != m)
-	{
-	  t = m = AUTORELEASE([t mutableCopy]);
-	}
-      [m replaceCharactersInRange: NSMakeRange(0, 9) withString: @""];
-    }
   return t;
 }
 
@@ -326,7 +351,10 @@ equalTypes(NSArray *t1, NSArray *t2)
   //The %@ tool
       [m replaceCharactersInRange: r withString: secHeading];
     }
-  [info setObject: m forKey: @"chapter"];
+  if (m)
+    {
+      [info setObject: m forKey: @"chapter"];
+    }
 }
 
 
@@ -3552,6 +3580,7 @@ countAttributes(NSSet *keys, NSDictionary *a)
   static NSSet 		*atomicity = nil;
   static NSSet 		*writability = nil;
   static NSSet 		*semantics = nil;
+  static NSSet 		*nullability = nil;
   NSMutableDictionary	*gd;
   NSMutableDictionary	*prop;
   NSMutableDictionary	*attr;
@@ -3585,7 +3614,17 @@ countAttributes(NSSet *keys, NSDictionary *a)
 	@"copy",
 	@"retain",
 	@"strong",
+	@"unsafe_unretained",
 	@"weak",
+	nil];
+    }
+  if (nil == nullability)
+    {
+      nullability = [[NSSet alloc] initWithObjects:
+	@"nonnull",
+	@"nullable",
+	@"null_resettable",
+	@"null_unspecified",
 	nil];
     }
 
@@ -3628,6 +3667,20 @@ countAttributes(NSSet *keys, NSDictionary *a)
 		  [self log: @"@property bad %@ spec", key];
 		  return nil;
 		}
+	      if ([key isEqual: @"setter"])
+		{
+		  if (':' == buffer[pos])
+		    {
+		      pos++;
+		      token = [token stringByAppendingString: @":"];
+		    }
+		  else
+		    {
+		      [self log: @"@property bad setter (no colon after %@)",
+			token];
+		      return nil;
+		    }
+		}
 	      [attr setObject: token forKey: key];
 	    }
 	  else
@@ -3644,7 +3697,11 @@ countAttributes(NSSet *keys, NSDictionary *a)
 		{
 		  [attr setObject: token forKey: token];
 		}
-	      else
+	      else if ([nullability member: token])
+		{
+		  [attr setObject: token forKey: token];
+		}
+	      else if (NO == [token isEqual: @"class"])
 		{
 		  [self log: @"@property unknown attribute %@",
 		    token];
@@ -3680,6 +3737,11 @@ countAttributes(NSSet *keys, NSDictionary *a)
   else if (0 == count)
     {
       [attr setObject: @"assign" forKey: @"assign"];
+    }
+  if ((count = countAttributes(nullability, attr)) > 1)
+    {
+      [self log: @"@property with multiple nullability attributes"];
+      return nil;
     }
   if ([attr objectForKey: @"readonly"] && [attr objectForKey: @"setter"])
     {
@@ -4641,7 +4703,8 @@ fail:
 
 		      tmp = [[NSString alloc] initWithCharacters: &buffer[start]
 							  length: pos - start];
-		      if ([tmp isEqualToString: @"NS_FORMAT_ARGUMENT"]
+		      if ([tmp isEqualToString: @"GS_NON_PORTABLE"]
+		        || [tmp isEqualToString: @"NS_FORMAT_ARGUMENT"]
 			|| [tmp isEqualToString: @"NS_FORMAT_FUNCTION"]
 			|| [tmp isEqualToString: @"NS_DEPRECATED"])
 			{
@@ -5761,7 +5824,7 @@ fail:
   qualifiedName: (NSString*)qName
   attributes: (NSDictionary*)attributeDict
 {
-  NSArray	*path = [(id)parser _tagPath];
+  NSArray	*path = [(GSStandaloneXMLParser*)parser tagPath];
   NSUInteger	count = [path count];
   NSString	*parent;
   NSSet		*permitted;
@@ -5820,19 +5883,10 @@ fail:
 				  in: (ValidationContext)context
 				  at: (unsigned)line
 {
-  static Class		parserClass = Nil;
   NSMutableString	*ms = AUTORELEASE([str mutableCopy]);
 
   ASSIGN(fileName, [agsp fileName]);
   lineNumber = line;
-  if (Nil == parserClass)
-    {
-      parserClass = NSClassFromString(@"GSSloppyXMLParser");
-      if (Nil == parserClass)
-	{
-	  parserClass = [NSXMLParser class];
-	}
-    }
 
   ENTER_POOL
   NSData		*data;
@@ -5895,7 +5949,8 @@ fail:
 	break;
     }
   data = [xml dataUsingEncoding: NSUTF8StringEncoding];
-  parser = (NSXMLParser*)AUTORELEASE([[parserClass alloc] initWithData: data]);
+  parser = (NSXMLParser*)AUTORELEASE(
+    [[GSStandaloneXMLParser alloc] initWithData: data]);
   [parser setDelegate: self];
   [self reset];
   if (NO == [parser parse] || YES == failed)

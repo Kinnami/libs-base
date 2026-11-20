@@ -1,5 +1,7 @@
-/** GSVersionMacros.h - macros for managing API versioning and visibility
-   Copyright (C) 2006-2014 Free Software Foundation, Inc.
+/** GSVersionMacros.h - macros for managing API versioning,
+   visibility and other OSX compatibility issues.
+
+   Copyright (C) 2006-2026 Free Software Foundation, Inc.
 
    Written by: Richard Frith-Macdonald <rfm@gnu.org>
    Date: Oct, October 2006
@@ -266,16 +268,26 @@
 #  define GS_UNIMPLEMENTED
 #endif
 
-/** This macro is placed immediately before the name of a method or function
+/** <p>This macro is placed immediately before the name of a method or function
  * to mark it as non-portable... a feature which does not work on all platforms
  * and should not be used unless you are specifically intending to write
  * non portable code which will only ever be used on a platform known to
  * support the feature.
+ * </p>
+ * <p>The macro uses the compiler feature to mark a method as deprecated, but
+ * in this case the deprecation does not imply imminant removal of APIs which
+ * exist for compatibility with MacOS-X, but is intended to let developers
+ * know (via the text in the macro) what other API they should use.<br />
+ * Generally the argument X should be of the form 'use ... instead'.
+ * </p>
+ * To suppress warnings about non portable code, define the
+ * GS_SUPPRESS_NON_PORTABLE_CODE_WARNINGS preprocessor constant.
  */
-#if defined(__clang__) || GS_GCC_MINREQ(3,1)
-#  define GS_NON_PORTABLE __attribute__((deprecated("*** not portable - please do not use this feature ***")))
+#if (defined(__clang__) || GS_GCC_MINREQ(3,1)) \
+  && !defined(GS_SUPPRESS_NON_PORTABLE_CODE_WARNINGS)
+#  define GS_NON_PORTABLE(X) __attribute__((deprecated("***  not portable - please do not use this feature, " #X " ***")))
 #else
-#  define GS_NON_PORTABLE
+#  define GS_NON_PORTABLE(X)
 #endif
 
 #define GS_UNUSED_ARG __attribute__((unused))
@@ -499,6 +511,39 @@ static inline void gs_consumed(id NS_CONSUMED GS_UNUSED_ARG o) { return; }
 #  define GS_HAS_DECLARED_PROPERTIES 1
 #else
 #  define GS_HAS_DECLARED_PROPERTIES 0
+#endif
+
+
+/* Other constants/types commonplace in OSX applications but otherwise unused.
+ */
+
+#if !defined(__APPLE__)
+// noErr                   OSErr: function performed properly - no error
+enum {
+  noErr                         = 0
+};
+
+// kNilOptions             OptionBits: all flags false
+enum {
+  kNilOptions                   = 0
+};
+
+#define kInvalidID   0
+
+// kVariableLengthArray    array bounds: variable length array
+enum {
+  kVariableLengthArray  
+#ifdef __has_extension
+   #if __has_extension(enumerator_attributes)
+		__attribute__((deprecated))  
+	#endif
+#endif
+  = 1
+};
+
+enum {
+  kUnknownType                  = 0x3F3F3F3F /* "????" QuickTime 3.0: default unknown ResType or OSType */
+};
 #endif
 
 #endif /* __GNUSTEP_GSVERSIONMACROS_H_INCLUDED_ */

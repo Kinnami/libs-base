@@ -52,13 +52,18 @@ DEFINE_BLOCK_TYPE_NO_ARGS(GSXPCInterruptionHandler, void);
 DEFINE_BLOCK_TYPE_NO_ARGS(GSXPCInvalidationHandler, void);
 
 
+/** This protocol is a non-functional stub to allow compilation of Apple code
+ * while porting.  Please use Distributed Objects rather than XPC.
+ */
 @protocol NSXPCProxyCreating
 
 - (id) remoteObjectProxy;
 
-- (id) remoteObjectProxyWithErrorHandler: (GSXPCProxyErrorHandler)handler;
+- (id) remoteObjectProxyWithErrorHandler: (GSXPCProxyErrorHandler)handler
+GS_NON_PORTABLE(do not use);
 
-- (id) synchronousRemoteObjectProxyWithErrorHandler: (GSXPCProxyErrorHandler)handler;
+- (id) synchronousRemoteObjectProxyWithErrorHandler: (GSXPCProxyErrorHandler)handler
+GS_NON_PORTABLE(do not use);
 
 @end
 
@@ -68,6 +73,9 @@ enum
 };
 typedef NSUInteger NSXPCConnectionOptions; 
   
+/** This class is a non-functional stub to allow compilation of Apple code
+ * while porting.  Please use Distributed Objects rather than XPC.
+ */
 GS_EXPORT_CLASS
 @interface NSXPCConnection : NSObject <NSXPCProxyCreating>
 
@@ -91,19 +99,25 @@ GS_EXPORT_CLASS
 - (id) remoteObjectProxy;
 - (void) setRemoteObjectProxy: (id)remoteObjectProxy;
 
-- (id) remoteObjectProxyWithErrorHandler:(GSXPCProxyErrorHandler)handler;
+- (id) remoteObjectProxyWithErrorHandler:(GSXPCProxyErrorHandler)handler
+GS_NON_PORTABLE(do not use);
 
 - (NSString *) serviceName;
 - (void) setServiceName: (NSString *)serviceName;
   
 - (id) synchronousRemoteObjectProxyWithErrorHandler:
-  (GSXPCProxyErrorHandler)handler;
+  (GSXPCProxyErrorHandler)handler
+GS_NON_PORTABLE(do not use);
 
-- (GSXPCInterruptionHandler) interruptionHandler; 
-- (void) setInterruptionHandler: (GSXPCInterruptionHandler)handler;
+- (GSXPCInterruptionHandler) interruptionHandler
+GS_NON_PORTABLE(do not use); 
+- (void) setInterruptionHandler: (GSXPCInterruptionHandler)handler
+GS_NON_PORTABLE(do not use);
   
-- (GSXPCInvalidationHandler) invalidationHandler; 
-- (void) setInvalidationHandler: (GSXPCInvalidationHandler)handler;
+- (GSXPCInvalidationHandler) invalidationHandler
+GS_NON_PORTABLE(do not use); 
+- (void) setInvalidationHandler: (GSXPCInvalidationHandler)handler
+GS_NON_PORTABLE(do not use);
   
 - (void) resume;
 
@@ -119,6 +133,9 @@ GS_EXPORT_CLASS
 @end
 
 
+/** This class is a non-functional stub to allow compilation of Apple code
+ * while porting.  Please use Distributed Objects rather than XPC.
+ */
 @interface NSXPCListener : NSObject
 
 + (NSXPCListener *) serviceListener;
@@ -141,6 +158,9 @@ GS_EXPORT_CLASS
 
 @end
 
+/** This protocol is a non-functional stub to allow compilation of Apple code
+ * while porting.  Please use Distributed Objects rather than XPC.
+ */
 @protocol NSXPCListenerDelegate <NSObject>
 
 - (BOOL) listener: (NSXPCListener *)listener
@@ -148,6 +168,9 @@ GS_EXPORT_CLASS
 
 @end
 
+/** This class is a non-functional stub to allow compilation of Apple code
+ * while porting.  Please use Distributed Objects rather than XPC.
+ */
 @interface NSXPCInterface : NSObject
 
 + (NSXPCInterface *) interfaceWithProtocol: (Protocol *)protocol;
@@ -175,6 +198,9 @@ GS_EXPORT_CLASS
 
 @end
 
+/** This class is a non-functional stub to allow compilation of Apple code
+ * while porting.  Please use Distributed Objects rather than XPC.
+ */
 GS_EXPORT_CLASS
 @interface NSXPCListenerEndpoint : NSObject <NSCoding>  // NSSecureCoding
 @end

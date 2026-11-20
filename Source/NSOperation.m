@@ -25,8 +25,17 @@
    */
 
 #import "common.h"
+
+/* Currently the libdispatch code here uses blocks.
+ * Until we have portable code, turn off libdispatch usage.
+ */
 #if GS_USE_LIBDISPATCH == 1
-#include "dispatch/dispatch.h"
+#  if __has_feature(blocks)
+#    include "dispatch/dispatch.h"
+#  else
+#    undef GS_USE_LIBDISPATCH
+#    define GS_USE_LIBDISPATCH 0
+#  endif
 #endif
 
 #import "Foundation/NSLock.h"
@@ -42,8 +51,10 @@
   BOOL finished; \
   BOOL blocked; \
   BOOL ready; \
+  BOOL debug; \
   NSMutableArray *dependencies; \
-  id completionBlock;
+  id delegate; \
+  GSOperationCompletionBlock completionBlock;
 
 #define	GS_NSOperationQueue_IVARS \
   NSRecursiveLock	*lock; \
@@ -61,6 +72,7 @@
 #import "Foundation/NSDictionary.h"
 #import "Foundation/NSEnumerator.h"
 #import "Foundation/NSException.h"
+#import "Foundation/NSInvocationOperation.h"
 #import "Foundation/NSKeyValueObserving.h"
 #import "Foundation/NSThread.h"
 #import "Foundation/NSValue.h"
@@ -192,7 +204,7 @@ static const NSInteger GSOperationFinishedCondition = 1;
 
 - (GSOperationCompletionBlock) completionBlock
 {
-  return (GSOperationCompletionBlock)internal->completionBlock;
+  return internal->completionBlock;
 }
 
 - (void) dealloc
@@ -214,7 +226,14 @@ static const NSInteger GSOperationFinishedCondition = 1;
       RELEASE(internal->dependencies);
       RELEASE(internal->cond);
       RELEASE(internal->lock);
-      RELEASE(internal->completionBlock);
+      if (internal->completionBlock)
+	{
+	  RELEASE(internal->completionBlock);
+	}
+      if (internal->delegate)
+	{
+	  objc_storeWeak(&internal->delegate, nil);
+	}
       GS_DESTROY_INTERNAL(NSOperation);
     }
   DEALLOC
@@ -248,14 +267,15 @@ static const NSInteger GSOperationFinishedCondition = 1;
       internal->lock = [NSRecursiveLock new];
       [internal->lock setName:
         [NSString stringWithFormat: @"lock-for-opqueue-%p", self]];
-      internal->cond
-	= [[NSConditionLock alloc] initWithCondition: GSOperationInitialCondition];
+      internal->cond = [[NSConditionLock alloc]
+	initWithCondition: GSOperationInitialCondition];
       [internal->cond setName:
         [NSString stringWithFormat: @"cond-for-opqueue-%p", self]];
       [self addObserver: self
              forKeyPath: @"isFinished"
                 options: NSKeyValueObservingOptionNew
                 context: isFinishedCtxt];
+      internal->debug = GSDebugSet(@"NSOperation");
     }
   return self;
 }
@@ -312,12 +332,32 @@ static const NSInteger GSOperationFinishedCondition = 1;
       [object removeObserver: self forKeyPath: @"isFinished"];
 
       /* Concurrent operations: Call completion block and set internal finished
-       * state so we don't try removing the observer again in -dealloc. */
-      if (YES == [self isConcurrent])
+       * state so we don't try removing the observer again in -dealloc.
+       */
+      if ([self isConcurrent])
         {
+	  if (internal->debug)
+	    {
+	      NSLog(@"Finish concurrent with weak ref %p", internal->delegate);
+	    }
           internal->finished = YES;
-          CALL_BLOCK_NO_ARGS(
-            ((GSOperationCompletionBlock)internal->completionBlock));
+	  if (internal->delegate)
+	    {
+	      id	del = [self delegate];
+
+	      if ([del respondsToSelector: @selector(operationCompleted)])
+		{
+		  if (internal->debug)
+		    {
+		      NSLog(@"Calling completion with %p", del);
+		    }
+		  [del operationCompleted];
+		}
+	    }
+	  else
+	    {
+	      CALL_BLOCK_NO_ARGS((internal->completionBlock));
+	    }
         }
 
       /* We have finished and need to unlock the condition lock so that
@@ -372,6 +412,7 @@ static const NSInteger GSOperationFinishedCondition = 1;
 
 - (void) setCompletionBlock: (GSOperationCompletionBlock)aBlock
 {
+  [self setDelegate: nil];
   ASSIGNCOPY(internal->completionBlock, (id)aBlock);
 }
 
@@ -428,13 +469,13 @@ static const NSInteger GSOperationFinishedCondition = 1;
   [internal->lock lock];
   NS_DURING
     {
-      if (YES == [self isExecuting])
+      if ([self isExecuting])
 	{
 	  [NSException raise: NSInvalidArgumentException
 		      format: @"[%@-%@] called on executing operation",
 	    NSStringFromClass([self class]), NSStringFromSelector(_cmd)];
 	}
-      if (YES == [self isFinished])
+      if ([self isFinished])
 	{
 	  [NSException raise: NSInvalidArgumentException
 		      format: @"[%@-%@] called on finished operation",
@@ -504,7 +545,7 @@ static const NSInteger GSOperationFinishedCondition = 1;
   [internal->lock lock];
   if (NO == internal->finished)
     {
-      if (YES == internal->executing)
+      if (internal->executing)
         {
 	  [self willChangeValueForKey: @"isExecuting"];
 	  [self willChangeValueForKey: @"isFinished"];
@@ -519,8 +560,27 @@ static const NSInteger GSOperationFinishedCondition = 1;
 	  internal->finished = YES;
 	  [self didChangeValueForKey: @"isFinished"];
 	}
-      CALL_BLOCK_NO_ARGS(
-	((GSOperationCompletionBlock)internal->completionBlock));
+      if (internal->debug)
+	{
+	  NSLog(@"Finish synchronous with weak ref %p", internal->delegate);
+	}
+      if (internal->delegate)
+	{
+	  id	del = [self delegate];
+
+	  if ([del respondsToSelector: @selector(operationCompleted)])
+	    {
+	      if (internal->debug)
+		{
+		  NSLog(@"Calling completion with %p", del);
+		}
+	      [del operationCompleted];
+	    }
+	}
+      else
+	{
+	  CALL_BLOCK_NO_ARGS((internal->completionBlock));
+	}
     }
   [internal->lock unlock];
 }
@@ -556,6 +616,49 @@ static const NSInteger GSOperationFinishedCondition = 1;
 
 @end
 
+
+@implementation	NSOperation (GNUstep)
++ (GSOperation*) operationTarget: (id)aTarget
+                 performSelector: (SEL)aSelector
+{
+  return [self operationTarget: aTarget
+	       performSelector: aSelector
+		    withObject: nil];
+}
+
++ (GSOperation*) operationTarget: (id)aTarget
+                 performSelector: (SEL)aSelector
+                      withObject: (id)anObject
+{
+  GSOperation	*o = [GSOperation alloc];
+
+  o = [o initTarget: aTarget selector: aSelector object: anObject];
+  return AUTORELEASE(o);
+}
+
+- (id<GSOperationCompletion>) delegate
+{
+  void  *ref = internal->delegate;
+  id    obj = objc_loadWeak(&internal->delegate);
+   
+  if (internal->debug)
+    {
+      NSLog(@"-delegate %p weak %p", obj, ref);
+    }
+  return (id<GSOperationCompletion>)obj;
+}
+
+- (void) setDelegate: (id<GSOperationCompletion>)anObject
+{
+  DESTROY(internal->completionBlock);
+  objc_storeWeak(&internal->delegate, (id)anObject);
+  if (internal->debug)
+    {
+      NSLog(@"-setDelegate: %p weak %p", anObject, internal->delegate);
+    }
+}
+
+@end
 
 @implementation NSBlockOperation
 
@@ -725,7 +828,7 @@ static void dispatchQueueExecuteOperation(void *context);
 
 - (void) dealloc
 {
-  if (YES == _ownsUnderlyingQueue)
+  if (_ownsUnderlyingQueue)
     {
       dispatch_release(_underlyingQueue);
     }
@@ -828,7 +931,7 @@ static void dispatchQueueExecuteOperation(void *context);
         }
 
       dispatch_retain(dispatchQueue);
-      if (YES == _ownsUnderlyingQueue && _underlyingQueue != NULL)
+      if (_ownsUnderlyingQueue && _underlyingQueue != NULL)
         {
           dispatch_release(_underlyingQueue);
         }
@@ -846,7 +949,7 @@ static void dispatchQueueExecuteOperation(void *context);
 
 - (void) initAsMainQueue
 {
-  if (YES == _ownsUnderlyingQueue && _underlyingQueue != NULL)
+  if (_ownsUnderlyingQueue && _underlyingQueue != NULL)
     {
       dispatch_release(_underlyingQueue);
     }
@@ -895,15 +998,23 @@ dispatchQueueExecuteOperation(void *context)
 }
 
 #if GS_USE_LIBDISPATCH == 1 && OS_API_VERSION(MAC_OS_X_VERSION_10_10, GS_API_LATEST)
-- (dispatch_queue_t) underlyingQueue
-{
-  return [(GSDispatchOperationQueueImpl *)internal->queueImpl underlyingQueue];
-}
-
 - (void) setUnderlyingQueue: (dispatch_queue_t)dispatchQueue
 {
   [(GSDispatchOperationQueueImpl *)internal->queueImpl
     setUnderlyingQueue: dispatchQueue];
+}
+- (dispatch_queue_t) underlyingQueue
+{
+  return [(GSDispatchOperationQueueImpl *)internal->queueImpl underlyingQueue];
+}
+#else
+- (void) setUnderlyingQueue: (void*)dispatchQueue
+{
+  return;
+}
+- (void*) underlyingQueue
+{
+  return NULL;
 }
 #endif
 
@@ -929,7 +1040,7 @@ dispatchQueueExecuteOperation(void *context)
       [internal->operations addObject: op];
       [self didChangeValueForKey: @"operationCount"];
       [self didChangeValueForKey: @"operations"];
-      if (YES == [op isReady])
+      if ([op isReady])
 	{
 	  [self observeValueForKeyPath: @"isReady"
 			      ofObject: op
@@ -943,8 +1054,20 @@ dispatchQueueExecuteOperation(void *context)
 
 - (void) addOperationWithBlock: (GSBlockOperationBlock)block
 {
-  NSBlockOperation *bop = [NSBlockOperation blockOperationWithBlock: block];
-  [self addOperation: bop];
+  NSBlockOperation *op = [[NSBlockOperation alloc] init];
+  
+  [op addExecutionBlock: block];
+  [self addOperation: op];
+  RELEASE(op);
+}
+
+- (void) addOperationWithInvocation: (NSInvocation*)inv
+{
+  NSInvocationOperation	*op;
+
+  op = [[NSInvocationOperation alloc] initWithInvocation: inv];
+  [self addOperation: op];
+  RELEASE(op);
 }
 
 
@@ -978,7 +1101,7 @@ dispatchQueueExecuteOperation(void *context)
 	      toAdd = 0;
 	      break;
 	    }
-	  if (YES == [op isFinished])
+	  if ([op isFinished])
 	    {
 	      buf[index] = nil;
 	      toAdd--;
@@ -1031,7 +1154,7 @@ dispatchQueueExecuteOperation(void *context)
           [internal->lock unlock];
 	}
       GS_ENDITEMBUF()
-      if (YES == invalidArg)
+      if (invalidArg)
 	{
 	  [NSException raise: NSInvalidArgumentException
 	    format: @"[%@-%@] object at index %"PRIuPTR" is not an NSOperation",
@@ -1039,7 +1162,7 @@ dispatchQueueExecuteOperation(void *context)
 	    index];
 	}
     }
-  if (YES == shouldWait)
+  if (shouldWait)
     {
       [self waitUntilAllOperationsAreFinished];
     }
@@ -1261,7 +1384,7 @@ dispatchQueueExecuteOperation(void *context)
   if (context == isFinishedCtxt)
     {
       NSOperation *op = object;
-      if (YES == [op isFinished])
+      if ([op isFinished])
         {
           [internal->lock lock];
           internal->executing--;
@@ -1525,7 +1648,7 @@ static const NSInteger GSThreadQueueHasWorkCondition = 1;
 	    }
 	  [mainQueueOperations addObject: op];
 	}
-      else if (YES == [op isConcurrent])
+      else if ([op isConcurrent])
 	{
 	  [op start];
 	}

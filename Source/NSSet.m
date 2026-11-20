@@ -898,7 +898,10 @@ static Class NSMutableSet_concrete_class;
 
 - (void) enumerateObjectsUsingBlock: (GSSetEnumeratorBlock)aBlock
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [self enumerateObjectsWithOptions: 0 usingBlock: aBlock];
+#pragma GCC diagnostic pop
 }
 
 - (void) enumerateObjectsWithOptions: (NSEnumerationOptions)opts
@@ -922,7 +925,10 @@ static Class NSMutableSet_concrete_class;
 
 - (NSSet *) objectsPassingTest: (GSSetFilterBlock)aBlock
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self objectsWithOptions: 0 passingTest: aBlock];
+#pragma GCC diagnostic pop
 }
 
 - (NSSet *) objectsWithOptions: (NSEnumerationOptions)opts
@@ -1097,12 +1103,9 @@ static Class NSMutableSet_concrete_class;
  */
 - (void) addObjectsFromArray: (NSArray*)array
 {
-  unsigned	i, c = [array count];
-
-  for (i = 0; i < c; i++)
-    {
-      [self addObject: [array objectAtIndex: i]];
-    }
+  GS_FOR_IN(id, o, array)
+  [self addObject: o];
+  GS_END_FOR(array)
 }
 
 /**

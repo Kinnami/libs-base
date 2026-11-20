@@ -40,6 +40,7 @@
 #import "Foundation/NSUUID.h"
 
 #import "GNUstepBase/GSTLS.h"
+#import "GNUstepBase/NSString+GNUstepBase.h"
 
 #import "GSPrivate.h"
 
@@ -126,12 +127,6 @@ static struct gcry_thread_cbs gcry_threads_other = {
 };
 #endif
 
-static void
-GSTLSLog(int level, const char *msg)
-{
-  NSLog(@"%s", msg);
-}
-
 /* The caFile variable holds the location of the file containing the default
  * certificate authorities to be used by our system.
  * The hard-coded value is the GNUTLS system default set, with a fallback to
@@ -171,19 +166,40 @@ static BOOL     verifyClient = NO;
  */
 static BOOL     verifyServer = YES;
 
-/* The globalDebug variable turns on gnutls debug.  The hard-code value is
+/* The globalDebug variable turns on gnutls debug.  The hard-coded value is
  * overridden by GS_TLS_DEBUG, which in turn can be overridden by the
  * GSTLSDebug user default. This is an integer debug level with higher
  * values producing more debug output.  Usually levels above 1 are too
  * verbose and not useful unless you have the gnutls source code to hand.
- * NB. The GSTLSDebug session option is a boolean to turn on extra debug for
- * a particular session to be produced on verification failure.
+ * NB. If the GSTLSDebug session option is used it additionally turns on
+ * session specific debug to be produced on verification failure for the
+ * particular session and may (if an integer value) turn on extra debug
+ * for that session (as if the global value was used).
  */
 static int      globalDebug = 0;
 
 /* Defines the default priority list.
  */
 static NSString *priority = nil;
+
+static void
+GSTLSLog(int level, const char *msg)
+{
+  GSTLSSession	*s = [GSCurrentThreadDictionary() objectForKey: @"GSTLS"];
+
+  /* If the thread is currently performing a handshake for some session,
+   * and that session has debug enabled, we log with the session owner.
+   * Otherwise, we log anything which matches the global debug level.
+   */
+  if ([s debug])
+    {
+      NSLog(@"%@ TLS handshake: %s", [s handle], msg);
+    }
+  else if (level <= globalDebug)
+    {
+      NSLog(@"%s", msg);
+    }
+}
 
 static gnutls_anon_client_credentials_t anoncred;
 
@@ -1554,7 +1570,7 @@ retrieve_callback(gnutls_session_t session,
 
 + (GSTLSSession*) sessionWithOptions: (NSDictionary*)options
                            direction: (BOOL)isOutgoing
-                           transport: (void*)ioHandle
+                           transport: (NSObject*)ioHandle
                                 push: (GSTLSIOW)pushFunc
                                 pull: (GSTLSIOR)pullFunc
 {
@@ -1642,6 +1658,7 @@ retrieve_callback(gnutls_session_t session,
       gnutls_db_remove_session(session);
       gnutls_deinit(session);
     }
+  handle = nil;
   return ok;
 }
 
@@ -1649,6 +1666,11 @@ retrieve_callback(gnutls_session_t session,
 {
   [self disconnect: NO];
   [super finalize];
+}
+
+- (NSObject*) handle
+{
+  return handle;
 }
 
 - (NSString*) hostName
@@ -1662,7 +1684,7 @@ retrieve_callback(gnutls_session_t session,
 
 - (id) initWithOptions: (NSDictionary*)options
              direction: (BOOL)isOutgoing
-             transport: (void*)ioHandle
+             transport: (NSObject*)ioHandle
                   push: (GSTLSIOW)pushFunc
                   pull: (GSTLSIOR)pullFunc
 {
@@ -1683,7 +1705,7 @@ retrieve_callback(gnutls_session_t session,
 
       /* Set this early because it is needed in debug output during init.
        */
-      handle = ioHandle;
+      handle = ioHandle;	// Not retained
 
       created = [NSDate timeIntervalSinceReferenceDate];
       opts = [options copy];
@@ -1702,6 +1724,33 @@ retrieve_callback(gnutls_session_t session,
         {
           verify = [str boolValue];
         }
+
+      if (nil != (str = [opts objectForKey: GSTLSServerName]))
+	{
+	  /* The GSTLSServerName may not be an address.
+	   * So an addres is moved to GSTLSRemoteHosts.
+	   */
+	  str = [str stringByTrimmingSpaces];
+	  if (GSPrivateIsAddress(str))
+	    {
+	      NSMutableDictionary	*m = [opts mutableCopy];
+	      NSString			*hosts;
+
+	      hosts = [opts objectForKey: GSTLSRemoteHosts];
+	      if ([hosts length] > 0)
+		{
+		  hosts = [hosts stringByAppendingFormat: @",%@", str];
+		}
+	      else
+		{
+		  hosts = str;
+		}
+	      [m setObject: hosts forKey: GSTLSRemoteHosts];
+	      [m removeObjectForKey: GSTLSServerName];
+	      ASSIGNCOPY(opts, m);
+	      RELEASE(m);
+	    }
+	}
 
       debug = (globalDebug > 0) ? YES : NO;
       if (NO == debug)
@@ -1729,19 +1778,19 @@ retrieve_callback(gnutls_session_t session,
                 {
                   if (ret < 0)
                     {
-                      NSLog(@"%p %@: failed '%s'",
+                      NSLog(@"%@ %@: failed '%s'",
                         handle, GSTLSServerName, gnutls_strerror(ret));
                     }
                   else
                     {
-                      NSLog(@"%p %@: set to '%s'",
+                      NSLog(@"%@ %@: set to '%s'",
                         handle, GSTLSServerName, ptr);
                     }
                 }
             }
           else if (debug)
             {
-              NSLog(@"%p %@: not set", handle, GSTLSServerName);
+              NSLog(@"%@ %@: not set", handle, GSTLSServerName);
             }
         }
       else
@@ -1950,7 +1999,7 @@ retrieve_callback(gnutls_session_t session,
 
 - (BOOL) handshake
 {
-  int   ret;
+  int   		ret;
 
   if (YES == active || NO == setup)
     {
@@ -1958,7 +2007,32 @@ retrieve_callback(gnutls_session_t session,
     }
 
   handshake = YES;
-  ret = gnutls_handshake(session);
+
+  if (debug)
+    {
+      NSMutableDictionary	*d = GSCurrentThreadDictionary();
+      GSTLSSession		*save = RETAIN([d objectForKey: @"GSTLS"]);
+
+      [d setObject: self forKey: @"GSTLS"];
+      if (nil == save && globalDebug < 6)
+	{
+	  gnutls_global_set_log_level(6);
+	}
+      ret = gnutls_handshake(session);
+      if (save)
+	{
+	  [d setObject: save forKey: @"GSTLS"];
+	  RELEASE(save);
+	}
+      else
+	{
+	  [d removeObjectForKey: @"GSTLS"];
+	}
+    }
+  else
+    {
+      ret = gnutls_handshake(session);
+    }
   if (ret < 0)
     {
       if (gnutls_error_is_fatal(ret))
@@ -2002,13 +2076,13 @@ retrieve_callback(gnutls_session_t session,
               ASSIGN(problem, p);
               if (debug)
                 {
-                  NSLog(@"%p in handshake: %@", handle, p);
+                  NSLog(@"%@ in handshake: %@", handle, p);
                 }
             }
           else
             {
               ASSIGN(problem, p);
-              NSLog(@"%p in handshake: %@", handle, p);
+              NSLog(@"%@ in handshake: %@", handle, p);
             }
           [self disconnect: NO];
           return YES;   // Failed ... not active.
@@ -2044,27 +2118,35 @@ retrieve_callback(gnutls_session_t session,
        * The requireVerified flag controls whether a verification failure
        * results in disconnect.
        */
-      if (globalDebug > 1)
+      if ((debug && requireVerified) || globalDebug > 1)
         {
-          NSLog(@"%p trying verify:\n%@", handle, [self sessionInfo]);
+          NSLog(@"%@ trying verify (required %s):\n%@",
+	    handle, (requireVerified ? "yes" : "no"), [self sessionInfo]);
         }
       ret = [self verify];
       if (ret < 0)
         {
           if (globalDebug > 1
-	    || (requireVerified && globalDebug > 0)
-            || YES == [[opts objectForKey: GSTLSDebug] boolValue])
+	    || (requireVerified && (debug || globalDebug > 0)))
             {
-              NSLog(@"%p unable to verify SSL connection - %s",
+              NSLog(@"%@ unable to verify SSL connection - %s",
                 handle, gnutls_strerror(ret));
-              NSLog(@"%p failed verify:\n%@", handle, [self sessionInfo]);
+              NSLog(@"%@ failed verify:\n%@", handle, [self sessionInfo]);
             }
           if (requireVerified)
             {
+	      if (debug || globalDebug > 1)
+		{
+		  NSLog(@"%@ disconnecting after verify failure.", handle);
+		}
               [self disconnect: NO];
             }
-	  else if (outgoing && nil == [opts objectForKey: GSTLSVerify])
+	  else
 	    {
+	      if ((debug && requireVerified) || globalDebug > 1)
+		{
+		  NSLog(@"%@ continuing after verify failure.", handle);
+		}
 	      /* We notify about verification failure on outgoing connections
 	       * if the failure was ignored, unless it was specifically turned
 	       * off by the app (GSTLSVerify set to NO). That is to say, if
@@ -2073,16 +2155,19 @@ retrieve_callback(gnutls_session_t session,
 	       * to catch connection attempts which would have failed if the
 	       * default setting had been to use strict verification.
 	       */
-              [[NSNotificationCenter defaultCenter]
-                postNotificationName: GSTLSVerifyFailedNotification
-                  object: self];
+	      if (outgoing && nil == [opts objectForKey: GSTLSVerify])
+		{
+		  [[NSNotificationCenter defaultCenter]
+		    postNotificationName: GSTLSVerifyFailedNotification
+		      object: self];
+		}
 	    }
         }
       else
         {
-          if (globalDebug > 1)
+          if ((debug && requireVerified) || globalDebug > 1)
             {
-              NSLog(@"%p succeeded verify:\n%@", handle, [self sessionInfo]);
+              NSLog(@"%@ succeeded verify:\n%@", handle, [self sessionInfo]);
             }
         }
       return YES;       // Handshake complete
@@ -2116,8 +2201,13 @@ retrieve_callback(gnutls_session_t session,
 
 - (NSInteger) read: (void*)buf length: (NSUInteger)len
 {
-  int   result = gnutls_record_recv(session, buf, len);
+  int   result;
 
+  if (NO == setup)
+    {
+      return 0;         // The session was closed down.
+    }
+  result = gnutls_record_recv(session, buf, len);
   if (result < 0)
     {
       NSString  *p;
@@ -2136,7 +2226,7 @@ retrieve_callback(gnutls_session_t session,
           ASSIGN(problem, p);
           if (debug)
             {
-              NSLog(@"%p in tls read: %@", handle, p);
+              NSLog(@"%@ in tls read: %@", handle, p);
             }
           if (EAGAIN == errno || EINTR == errno)
             {
@@ -2151,7 +2241,7 @@ retrieve_callback(gnutls_session_t session,
                 {
                   p = [NSString stringWithFormat: @"%s",
                     gnutls_alert_get_name(gnutls_alert_get(session))];
-                  NSLog(@"%p in tls read: %@", handle, p);
+                  NSLog(@"%@ in tls read: %@", handle, p);
                 }
             }
           errno = EAGAIN;       // Need to retry.
@@ -2174,8 +2264,19 @@ retrieve_callback(gnutls_session_t session,
 
 - (NSInteger) write: (const void*)buf length: (NSUInteger)len
 {
-  int   result = gnutls_record_send(session, buf, len);
+  int   result;
 
+  if (NO == setup)
+    {
+      /* The session was closed down.
+       */
+      errno = EBADF;
+#if	defined(_WIN32)
+      WSASetLastError(WSAEBADF);
+#endif
+      return -1;
+    }
+  result = gnutls_record_send(session, buf, len);
   if (result < 0)
     {
       if (GNUTLS_E_AGAIN == result)
@@ -2194,7 +2295,7 @@ retrieve_callback(gnutls_session_t session,
           ASSIGN(problem, p);
           if (debug)
             {
-              NSLog(@"%p in tls write: %@", handle, p);
+              NSLog(@"%@ in tls write: %@", handle, p);
             }
           if (EAGAIN == errno || EINTR == errno)
             {
@@ -2241,8 +2342,20 @@ retrieve_callback(gnutls_session_t session,
 
   if (outgoing)
     {
-      [str appendFormat: @"- Outgoing session: %p to '%@'\n",
-	self, [self hostName]];
+      NSString	*s;
+
+      [str appendFormat: @"- Outgoing session: %p", self];
+      s = [opts objectForKey: GSTLSRemoteHosts];
+      if ([s length])
+	{
+	  [str appendFormat: @" remote hosts (%@)", s];
+	}
+      s = [opts objectForKey: GSTLSServerName];
+      if ([s length])
+	{
+          [str appendFormat: @" server name (%@)", s];
+	}
+      [str appendString: @"\n"];
     }
   else
     {
@@ -2443,7 +2556,7 @@ retrieve_callback(gnutls_session_t session,
       str = [NSString stringWithFormat:
         @"TLS verification: error %s", gnutls_strerror(ret)];
       ASSIGN(problem, str);
-      if (debug) NSLog(@"%p %@", handle, problem);
+      if (debug) NSLog(@"%@ %@", handle, problem);
       return GNUTLS_E_CERTIFICATE_ERROR;
     }
 
@@ -2480,7 +2593,7 @@ retrieve_callback(gnutls_session_t session,
 	  str = @"TLS verification: remote certificate is not trusted.";
 	}
       ASSIGN(problem, str);
-      if (debug) NSLog(@"%p %@", handle, problem);
+      if (debug) NSLog(@"%@ %@", handle, problem);
       return GNUTLS_E_CERTIFICATE_ERROR;
     }
 
@@ -2492,7 +2605,7 @@ retrieve_callback(gnutls_session_t session,
     {
       ASSIGN(problem,
         @"TLS verification: remote certificate not of the X509 type.");
-      if (debug) NSLog(@"%p %@", handle, problem);
+      if (debug) NSLog(@"%@ %@", handle, problem);
       return GNUTLS_E_CERTIFICATE_ERROR;
     }
 
@@ -2500,7 +2613,7 @@ retrieve_callback(gnutls_session_t session,
     {
       ASSIGN(problem, @"TLS verification: error in certificate initialization");
       gnutls_x509_crt_deinit(cert);
-      if (debug) NSLog(@"%p %@", handle, problem);
+      if (debug) NSLog(@"%@ %@", handle, problem);
       return GNUTLS_E_CERTIFICATE_ERROR;
     }
 
@@ -2509,7 +2622,7 @@ retrieve_callback(gnutls_session_t session,
     {
       ASSIGN(problem, @"TLS verification: no certificate from remote end!");
       gnutls_x509_crt_deinit(cert);
-      if (debug) NSLog(@"%p %@", handle, problem);
+      if (debug) NSLog(@"%@ %@", handle, problem);
       return GNUTLS_E_CERTIFICATE_ERROR;
     }
 
@@ -2517,7 +2630,7 @@ retrieve_callback(gnutls_session_t session,
     {
       ASSIGN(problem, @"TLS verification: error parsing certificate");
       gnutls_x509_crt_deinit(cert);
-      if (debug) NSLog(@"%p %@", handle, problem);
+      if (debug) NSLog(@"%@ %@", handle, problem);
       return GNUTLS_E_CERTIFICATE_ERROR;
     }
   else
@@ -2605,7 +2718,7 @@ retrieve_callback(gnutls_session_t session,
             nameList, ci];
           ASSIGN(problem, str);
           gnutls_x509_crt_deinit(cert);
-          if (debug) NSLog(@"%p %@", handle, problem);
+          if (debug) NSLog(@"%@ %@", handle, problem);
           return GNUTLS_E_CERTIFICATE_ERROR;
         }
     }
@@ -2620,7 +2733,7 @@ retrieve_callback(gnutls_session_t session,
             names, ci];
           ASSIGN(problem, str);
 	  gnutls_x509_crt_deinit(cert);
-          if (debug) NSLog(@"%p %@", handle, problem);
+          if (debug) NSLog(@"%@ %@", handle, problem);
           return GNUTLS_E_CERTIFICATE_ERROR;
         }
     }
@@ -2635,7 +2748,7 @@ retrieve_callback(gnutls_session_t session,
             names, ci];
           ASSIGN(problem, str);
 	  gnutls_x509_crt_deinit(cert);
-          if (debug) NSLog(@"%p %@", handle, problem);
+          if (debug) NSLog(@"%@ %@", handle, problem);
           return GNUTLS_E_CERTIFICATE_ERROR;
         }
     }

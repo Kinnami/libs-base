@@ -794,6 +794,10 @@ static BOOL useTinyStrings;
  * A GSTinyString is used on 64-bit platforms to store up to 8 ASCII (7-bit)
  * characters inside a pointer.  Note that a mutable version of this class is
  * not possible, because modifying the string changes the pointer value.
+ * The length field could specify up to 15 characters so we could theoretically
+ * have up to 7 implied nul characters at the end of a string, but supporting
+ * that would add code complexity (and reduce performance) without providing
+ * any real gain.
  * The layout of a tiny string is as follows:
   struct
   {
@@ -877,13 +881,13 @@ tsbytes(uintptr_t s, char *buf)
 
 - (BOOL) boolValue
 {
-  char  buf[9];
-  int   count =  tsbytes((uintptr_t)self, buf);
-  int   i;
+  uint8_t	buf[9];
+  int   	count =  tsbytes((uintptr_t)self, (char*)buf);
+  int   	i;
 
   for (i = 0; i < count; i++)
     {
-      char	c = buf[i];
+      uint8_t	c = buf[i];
 
       if (strchr("123456789yYtT", c) != 0)
         {
@@ -1196,20 +1200,13 @@ createTinyString(const char *str, int length)
 
   /* String too long to fit in a pointer, give up
    */
-  if (length > 9)
+  if (length > 8)
     {
       return nil;
     }
 
-  /* String would fit if the last byte was an implicit 0, but it isn't.
-   */
-  if ((length == 9) && str[8] != '\0')
-    {
-      return nil;
-    }
-  
   s |= length << TINY_STRING_LENGTH_SHIFT;
-  for (i = 0 ; i<length ; i++)
+  for (i = 0; i < length; i++)
     {
       // If this is not a 7-bit character, we can't use it.
       if (str[i] & 0x80) { return nil; }
@@ -1635,6 +1632,10 @@ fixBOM(unsigned char **bytes, NSUInteger*length, BOOL *owned,
    * allocated on the stack.  The GSPrivateFormat function can write into it.
    */
   f = (GSStr)alloca(class_getInstanceSize(GSMutableStringClass));
+  /* Set the initial value of the memory to NULL to avoid object_setClass()
+   * being confused.
+   */
+  *(void**)f = NULL;
   object_setClass(f, GSMutableStringClass);
   f->_zone = NSDefaultMallocZone();
   f->_contents.c = buf;
@@ -1911,7 +1912,7 @@ boolValue_c(GSStr self)
 
   for (i = 0; i < count; i++)
     {
-      char	c = self->_contents.c[i];
+      uint8_t	c = self->_contents.c[i];
 
       if (strchr("123456789yYtT", c) != 0)
         {
@@ -2518,6 +2519,10 @@ getCString_c(GSStr self, char *buffer, unsigned int maxLength,
    * unicode function to get the cString.
    */
   o = (GSMutableString*)alloca(class_getInstanceSize(GSMutableStringClass));
+  /* Set the initial value of the memory to NULL to avoid object_setClass()
+   * being confused.
+   */
+  *(void**)o = NULL;
   object_setClass(o, GSMutableStringClass);
   o->_count = self->_count;
   o->_flags.wide = 0;

@@ -214,15 +214,17 @@ BaseAdditions_AGSDOC_FILES = \
 GNUstep.h \
 GCObject.h \
 GSBlocks.h \
+GSBoxWeak.h \
 GSVersionMacros.h \
 GSObjCRuntime.h \
 GSUnion.h \
 GSIArray.h \
 GSIMap.h \
-GSLocale.h \
 GSFunctions.h \
+GSLocale.h \
 GSMime.h \
 GSMinHeap.h \
+GSOperation.h \
 GSTLS.h \
 GSURITemplate.h \
 GSXML.h \
@@ -237,6 +239,7 @@ NSMutableString+GNUstepBase.h \
 NSNumber+GNUstepBase.h \
 NSObject+GNUstepBase.h \
 NSProcessInfo+GNUstepBase.h \
+NSProgress+GNUstepBase.h \
 NSString+GNUstepBase.h \
 NSTask+GNUstepBase.h \
 NSThread+GNUstepBase.h \

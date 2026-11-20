@@ -35,6 +35,7 @@
 #import "Foundation/NSInvocation.h"
 
 #import "NSDatePrivate.h"
+#import "GSPrivate.h"
 
 static Class	NSDate_class;
 
@@ -66,21 +67,32 @@ static Class	NSDate_class;
 
   if ([self isValid])
     {
-      if (_selector == 0)
+      if (nil == _target)
+	{
+          s = [NSString stringWithFormat: @"%@ at %@ calls %@",
+            s, [self fireDate], _block];
+	}
+      else if (_selector == 0)
         {
-          return [NSString stringWithFormat: @"%@ at %@ invokes %@",
+          s = [NSString stringWithFormat: @"%@ at %@ invokes %@",
             s, [self fireDate], _target];
         }
       else
         {
-          return [NSString stringWithFormat: @"%@ at %@ sends %@ to (%@)",
+          s = [NSString stringWithFormat: @"%@ at %@ sends %@ to (%@)",
             s, [self fireDate], NSStringFromSelector(_selector), _target];
         }
+      if (_modeMask)
+	{
+	  s = [s stringByAppendingFormat: @", scheduled in modes: 0x%0"PRIx64,
+	    _modeMask];
+	}
     }
   else
     {
-      return [NSString stringWithFormat: @"%@ (invalidated)", s];
+      s = [NSString stringWithFormat: @"%@ (invalidated)", s];
     }
+  return s;
 }
 
 /* For MacOS-X compatibility, this returns nil.
@@ -160,7 +172,7 @@ static Class	NSDate_class;
                         repeats: repeats];
   if (self)
     {
-      ASSIGN(_block, (id)block);
+      ASSIGNCOPY(_block, (id)block);
     }
   return self;
 }
@@ -296,9 +308,16 @@ static Class	NSDate_class;
     {
       if ((id)_block != nil)
         {
+          GSTimerBlock	block;
+
+          /* We retain the block so it won't be deallocated while we are
+           * calling it (if this timer gets invalidated while we are firing).
+           */
+          block = (GSTimerBlock)RETAIN((id)_block);
+
           NS_DURING
             {
-              CALL_NON_NULL_BLOCK(_block, self);
+              CALL_NON_NULL_BLOCK(block, self);
             }
           NS_HANDLER
             {
@@ -307,6 +326,7 @@ static Class	NSDate_class;
                 [localException name], [localException reason]);
             }
           NS_ENDHANDLER
+          RELEASE((id)block);
         }
       else
         {
@@ -410,14 +430,19 @@ static Class	NSDate_class;
 
 /**
  * Change the fire date for the receiver.<br />
- * NB. You should <em>NOT</em> use this method for a timer which has
- * been added to a run loop.  The only time when it is safe to modify
- * the fire date of a timer in a run loop is for a repeating timer
- * when the timer is actually in the process of firing.
+ * If the timer is scheduled in a run loop, it is moved to the position
+ * matching its new fire date, so that it fires at that date.<br />
+ * NB. Run loops are not thread-safe, so for a scheduled timer this
+ * method must be called from the thread whose run loop the timer is
+ * scheduled in.
  */
 - (void) setFireDate: (NSDate*)fireDate
 {
   ASSIGN(_date, fireDate);
+  if (_modeMask != 0 && NO == _invalidated)
+    {
+      [NSRunLoop _repositionTimer: self];
+    }
 }
 
 /**

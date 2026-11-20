@@ -277,6 +277,32 @@ GSPrivateSockaddrLength(struct sockaddr *addr)
   }
 }
 
+BOOL
+GSPrivateIsAddress(NSString *host)
+{
+  const char		*str = [host UTF8String];
+  struct in_addr	v4;
+#if     defined(AF_INET6)
+  struct in6_addr	v6;
+#endif
+
+  if (NULL == str)
+    {
+      return NO;
+    }
+  if (inet_pton(AF_INET, str, &v4) == 1)
+    {
+      return YES;
+    }
+#if     defined(AF_INET6)
+  if (inet_pton(AF_INET6, str, &v6) == 1)
+    {
+      return YES;
+    }
+#endif
+  return NO;
+}
+
 NSString *
 GSPrivateSockaddrHost(struct sockaddr *addr)
 {
@@ -337,25 +363,28 @@ GSPrivateSockaddrSetup(NSString *machine, uint16_t port,
    */
   if (0 != [machine length])
     {
-      const char	*n;
+      const uint8_t	*n;
+      const char	*p;
 
-      n = [machine UTF8String];
-      if ((!isdigit(n[0]) || sscanf(n, "%*d.%*d.%*d.%*d") != 4)
-	&& 0 == strchr(n, ':'))
+      p = [machine UTF8String];
+      n = (const uint8_t*)p;
+      if ((!isdigit(n[0]) || sscanf(p, "%*d.%*d.%*d.%*d") != 4)
+	&& 0 == strchr(p, ':'))
 	{
 	  machine = [[NSHost hostWithName: machine] address];
-	  n = [machine UTF8String];
+	  p = [machine UTF8String];
+          n = (const uint8_t*)p;
 	}
 
       if (0 == n)
 	{
 	  return NO;
 	}
-      if (0 == strchr(n, ':'))
+      if (0 == strchr(p, ':'))
 	{
 	  struct sockaddr_in	*addr = (struct sockaddr_in*)(void*)sin;
 
-	  if (inet_pton(AF_INET, n, &addr->sin_addr) <= 0)
+	  if (inet_pton(AF_INET, p, &addr->sin_addr) <= 0)
 	    {
 	      return NO;
 	    }
@@ -366,7 +395,7 @@ GSPrivateSockaddrSetup(NSString *machine, uint16_t port,
 	  struct sockaddr_in6	*addr6 = (struct sockaddr_in6*)(void*)sin;
 
 	  sin->sa_family = AF_INET6;
-	  if (inet_pton(AF_INET6, n, &addr6->sin6_addr) <= 0)
+	  if (inet_pton(AF_INET6, p, &addr6->sin6_addr) <= 0)
 	    {
 	      return NO;
 	    }
@@ -402,8 +431,8 @@ GSPrivateSockaddrSetup(NSString *machine, uint16_t port,
       sname = [service UTF8String];
       if ((sp = getservbyname(sname, proto)) == 0)
 	{
-	  const char*     ptr = sname;
-	  int             val = atoi(ptr);
+	  const uint8_t	*ptr = (const uint8_t*)sname;
+	  int           val = atoi((const char*)ptr);
 
 	  while (isdigit(*ptr))
 	    {
@@ -413,7 +442,7 @@ GSPrivateSockaddrSetup(NSString *machine, uint16_t port,
 	    {
 	      port = val;
 	    }
-	  else if (strcmp(ptr, "gdomap") == 0)
+	  else if (strcmp((const char*)ptr, "gdomap") == 0)
 	    {
 #ifdef	GDOMAP_PORT_OVERRIDE
 	      port = GDOMAP_PORT_OVERRIDE;
@@ -572,6 +601,8 @@ GSPrivateSockaddrSetup(NSString *machine, uint16_t port,
 {
 @public
   GSTLSSession  *session;
+  unsigned      calls;          // Calls into the session in progress
+  BOOL          byePending;     // Closed down during such a call
 }
 
 /** Populates the dictionary 'dict', copying in all the properties
@@ -756,11 +787,66 @@ static NSArray  *keys = nil;
     }
 }
 
+/* Starts a call into the session, which may send stream events (and thus
+ * call the delegate) from the push and pull callbacks.
+ */
+- (void) _beginCall
+{
+  RETAIN(self);
+  calls++;
+}
+
+/* Ends a call into the session, closing it down if that was requested
+ * while the call was in progress.
+ */
+- (void) _endCall
+{
+  if (0 == --calls && YES == byePending)
+    {
+      [self bye];
+    }
+  RELEASE(self);
+}
+
 - (void) bye
 {
   handshake = NO;
   active = NO;
+  if (calls > 0)
+    {
+      /* A delegate closed the stream on an event sent from within a call
+       * into the session, which still uses the session we would release.
+       */
+      byePending = YES;
+      return;
+    }
+  byePending = NO;
   [session disconnect: NO];
+}
+
+/* Records a failed handshake as an error on both streams, so that neither
+ * is reported as open.
+ */
+- (void) handshakeFailed: (NSString*)problem
+{
+  NSError	*theError;
+
+  if (nil == problem)
+    {
+      problem = @"TLS handshake failure";
+    }
+  theError = [NSError errorWithDomain: NSCocoaErrorDomain
+    code: 0
+    userInfo: [NSDictionary dictionaryWithObject: problem
+      forKey: NSLocalizedDescriptionKey]];
+  if ([istream streamStatus] != NSStreamStatusError)
+    {
+      [istream _recordError: theError];
+    }
+  if ([ostream streamStatus] != NSStreamStatusError)
+    {
+      [ostream _recordError: theError];
+    }
 }
 
 - (void) dealloc
@@ -779,37 +865,24 @@ static NSArray  *keys = nil;
 {
   if (active == NO)
     {
+      BOOL      done;
+
       if (handshake == NO)
         {
           /* Set flag to say we are now doing a handshake.
            */
           handshake = YES;
         }
-      if ([session handshake] == YES)
+      [self _beginCall];
+      done = [session handshake];
+      [self _endCall];
+      if (done == YES)
         {
           handshake = NO;               // Handshake is now complete.
           active = [session active];    // Is the TLS session now active?
           if (NO == active)
             {
-              NSString  *problem = [session problem];
-              NSError   *theError;
-
-              if (nil == problem)
-                {
-                  problem = @"TLS handshake failure";
-                }
-              theError = [NSError errorWithDomain: NSCocoaErrorDomain
-                code: 0
-                userInfo: [NSDictionary dictionaryWithObject: problem
-                  forKey: NSLocalizedDescriptionKey]];
-              if ([istream streamStatus] != NSStreamStatusError)
-                {
-                  [istream _recordError: theError];
-                }
-              if ([ostream streamStatus] != NSStreamStatusError)
-                {
-                  [ostream _recordError: theError];
-                }
+              [self handshakeFailed: [session problem]];
               [self bye];
             }
           else
@@ -912,7 +985,12 @@ static NSArray  *keys = nil;
 
 - (NSInteger) read: (uint8_t *)buffer maxLength: (NSUInteger)len
 {
-  return [session read: buffer length: len];
+  NSInteger     result;
+
+  [self _beginCall];
+  result = [session read: buffer length: len];
+  [self _endCall];
+  return result;
 }
 
 - (void) stream: (NSStream*)stream handleEvent: (NSStreamEvent)event
@@ -935,8 +1013,13 @@ static NSArray  *keys = nil;
           case NSStreamEventErrorOccurred:
           case NSStreamEventEndEncountered:
             /* stream error or close ... handshake fails.
+             * This may arrive from within the handshake itself, when the
+             * TLS code reads the end of the connection.
              */
             handshake = NO;
+            [self handshakeFailed: (event == NSStreamEventEndEncountered)
+              ? @"Connection closed during TLS handshake"
+              : [[stream streamError] localizedDescription]];
             break;
 
           default:
@@ -989,6 +1072,15 @@ static NSArray  *keys = nil;
 {
   NSInteger	offset = 0;
 
+  if (NO == active)
+    {
+      /* Nothing can be written before the handshake has completed (the
+       * stream then sends NSStreamEventHasSpaceAvailable), nor once the
+       * session has failed or been closed down.
+       */
+      return (YES == handshake) ? 0 : -1;
+    }
+
   /* The low level code to perform the TLS session write may return a
    * partial write even though the output stream is still writable.
    * That means we wouldn't get an event to say there's more space and
@@ -1000,10 +1092,41 @@ static NSArray  *keys = nil;
     {
       NSInteger	written;
 
+      [self _beginCall];
       written = [session write: buffer + offset length: len - offset];
+      [self _endCall];
       if (written > 0)
 	{
 	  offset += written;
+	}
+      else if (NO == [session active])
+	{
+	  break;	// The session was closed down.
+	}
+      else
+	{
+	  /* The session sets EAGAIN or EINTR for a write to retry later,
+	   * and any other errno for a failure.
+	   */
+	  if (0 == offset && EAGAIN != errno && EINTR != errno)
+	    {
+	      if ([ostream streamStatus] != NSStreamStatusError)
+		{
+		  NSString	*problem = [session problem];
+
+		  if (nil == problem)
+		    {
+		      problem = @"TLS write failure";
+		    }
+		  [ostream _recordError: [NSError
+		    errorWithDomain: NSCocoaErrorDomain
+		    code: 0
+		    userInfo: [NSDictionary dictionaryWithObject: problem
+		      forKey: NSLocalizedDescriptionKey]]];
+		}
+	      offset = -1;
+	    }
+	  break;
 	}
     }
   return offset;
@@ -1036,6 +1159,7 @@ static NSArray  *keys = nil;
         GSTLSPriority,
         GSTLSRemoteHosts,
         GSTLSRevokeFile,
+        GSTLSServerName,
         GSTLSVerify,
         nil];
       [[NSObject leakAt: &keys] release];
@@ -1479,10 +1603,10 @@ static NSString * const GSSOCKSAckConn = @"GSSOCKSAckConn";
 	}
       else if (state == GSSOCKSSendConn)
 	{
-	  unsigned char	buf[10];
+	  uint8_t	buf[10];
 	  int		want = 10;
 	  int		result;
-	  const char	*ptr;
+	  const uint8_t	*ptr;
 
 	  /*
 	   * Connect command is ten bytes -
@@ -1497,20 +1621,26 @@ static NSString * const GSSOCKSAckConn = @"GSSOCKSAckConn";
 	  buf[1] = 1;	// Connect command
 	  buf[2] = 0;	// Reserved
 	  buf[3] = 1;	// Address type (IPV4)
-	  ptr = [address UTF8String];
-	  buf[4] = atoi(ptr);
+	  ptr = (const uint8_t*)[address UTF8String];
+	  buf[4] = atoi((const char*)ptr);
 	  while (isdigit(*ptr))
-	    ptr++;
+	    {
+	      ptr++;
+	    }
 	  ptr++;
-	  buf[5] = atoi(ptr);
+	  buf[5] = atoi((const char*)ptr);
 	  while (isdigit(*ptr))
-	    ptr++;
+	    {
+	      ptr++;
+	    }
 	  ptr++;
-	  buf[6] = atoi(ptr);
+	  buf[6] = atoi((const char*)ptr);
 	  while (isdigit(*ptr))
-	    ptr++;
+	    {
+	      ptr++;
+	    }
 	  ptr++;
-	  buf[7] = atoi(ptr);
+	  buf[7] = atoi((const char*)ptr);
 	  result = [port intValue];
 	  buf[8] = ((result & 0xff00) >> 8);
 	  buf[9] = (result & 0xff);
@@ -1848,6 +1978,16 @@ setNonBlocking(SOCKET fd)
       RETAIN(self);
       [self _sendEvent: event delegate: _handler];
       RELEASE(self);
+    }
+  else if (_handler != nil && [self streamStatus] == NSStreamStatusError
+    && (event == NSStreamEventOpenCompleted
+      || event == NSStreamEventHasSpaceAvailable
+      || event == NSStreamEventHasBytesAvailable))
+    {
+      /* The handshake failed while this event was being dispatched (e.g.
+       * when opening the stream read the end of the connection), so the
+       * stream must not be reported as open or usable.
+       */
     }
   else
     {
@@ -2993,15 +3133,13 @@ setNonBlocking(SOCKET fd)
 #if	defined(_WIN32)
 - (BOOL) runLoopShouldBlock: (BOOL*)trigger
 {
+  /* The socket's event is registered against this stream and carries the
+   * events of the sibling input stream as well, so the run loop is left to
+   * block on it. A delegate with more to write is driven by the loop in
+   * -_dispatch, which sends NSStreamEventHasSpaceAvailable for as long as
+   * the delegate keeps writing, so there is nothing to poll for here.
+   */
   *trigger = YES;
-  if ([self _unhandledData] == YES && [self streamStatus] == NSStreamStatusOpen)
-    {
-      /* In winsock, a writable status is only signalled if an earlier
-       * write failed (because it would block), so we must simulate the
-       * writable event by having the run loop trigger without blocking.
-       */
-      return NO;
-    }
   return YES;
 }
 #endif

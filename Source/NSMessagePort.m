@@ -535,9 +535,9 @@ static Class	runLoopClass;
 		 extra: (void*)extra
 	       forMode: (NSString*)mode
 {
-  NSDebugMLLog(@"NSMessagePort_details",
-    @"received %s event on 0x%"PRIxPTR,
-    type != ET_WDESC ? "read" : "write", (NSUInteger)self);
+  NSDebugMLLog(@"NSPort", @"received %@ event %p on %@ in %@",
+    [NSRunLoop nameOfEventType: type], extra, self, mode);
+
   /*
    * If we have been invalidated (desc < 0) then we should ignore this
    * event and remove ourself from the runloop.
@@ -1255,6 +1255,7 @@ typedef	struct {
       if (shouldListen == YES)
 	{
 	  int	desc;
+	  int	flags;
 	  struct sockaddr_un	sockAddr;
 
 	  /*
@@ -1321,6 +1322,20 @@ typedef	struct {
 	  else if (getsockname(desc, (struct sockaddr*)&sockAddr, &i) < 0)
 	    {
 	      NSLog(@"unable to get socket name - %@", [NSError _last]);
+	      (void) close(desc);
+	      DESTROY(port);
+	    }
+	  /*
+	   * The run loop may report the listener readable when there is
+	   * no connection left to accept, e.g. when a nested run loop has
+	   * accepted it before the outer loop handles its stale poll
+	   * result.  A blocking accept() would then hang the thread.
+	   */
+	  else if ((flags = fcntl(desc, F_GETFL, 0)) < 0
+	    || fcntl(desc, F_SETFL, flags | NBLK_OPT) < 0)
+	    {
+	      NSLog(@"unable to set non-blocking mode on port - %@",
+		[NSError _last]);
 	      (void) close(desc);
 	      DESTROY(port);
 	    }
@@ -1640,6 +1655,9 @@ typedef	struct {
   int		desc = (int)(uintptr_t)extra;
   GSMessageHandle	*handle;
 
+  NSDebugMLLog(@"NSPort", @"received %@ event %p on %@ in %@",
+    [NSRunLoop nameOfEventType: type], extra, self, mode);
+
   if (desc == lDesc)
     {
       struct sockaddr_un	sockAddr;
@@ -1681,13 +1699,14 @@ typedef	struct {
       M_UNLOCK(myLock);
       if (handle == nil)
 	{
-	  const char	*t;
-
-	  if (type == ET_RDESC) t = "rdesc";
-	  else if (type == ET_WDESC) t = "wdesc";
-	  else if (type == ET_RPORT) t = "rport";
-	  else t = "unknown";
-	  NSLog(@"No handle for event %s on descriptor %d", t, desc);
+	  NSLog( @"No handle found for event %@ on descriptor %d",
+	    [NSRunLoop nameOfEventType: type], desc);
+/*
+	  [[NSRunLoop currentRunLoop] removeEvent: data
+					     type: type
+					  forMode: mode
+					      all: NO];
+*/
 	}
       else
 	{

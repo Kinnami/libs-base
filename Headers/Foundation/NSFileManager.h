@@ -310,9 +310,11 @@ GS_EXPORT_CLASS
  */
 - (BOOL) createSymbolicLinkAtPath: (NSString*)path
               withDestinationPath: (NSString*)destPath
-                            error: (NSError**)error;
+                            error: (NSError *_Nullable *_Nullable)error;
 
-- (BOOL) setAttributes:(NSDictionary *)attributes ofItemAtPath:(NSString *)path error:(NSError **)error;
+- (BOOL) setAttributes: (NSDictionary *)attributes
+	  ofItemAtPath: (NSString*)path
+		 error: (NSError**)error;
 #endif
 
 /**
@@ -349,11 +351,11 @@ GS_EXPORT_CLASS
  * Locates and, optionally, creates the specified common directory in
  * domain
  */
-- (NSURL *)URLForDirectory: (NSSearchPathDirectory)directory 
+- (NSURL*) URLForDirectory: (NSSearchPathDirectory)directory 
                   inDomain: (NSSearchPathDomainMask)domain 
-         appropriateForURL: (NSURL *)url 
+         appropriateForURL: (NSURL*)url 
                     create: (BOOL)shouldCreate 
-                     error: (NSError **)error;
+                     error: (NSError**)error;
 
 /**
  * Returns an array of search paths to look at for resources.<br />
@@ -367,16 +369,18 @@ GS_EXPORT_CLASS
  * specify a particular domain, and then create the path in the file
  * system if it does not already exist.
  */
-- (GS_GENERIC_CLASS(NSArray, NSURL *) *)URLsForDirectory: (NSSearchPathDirectory)directory
-                                               inDomains: (NSSearchPathDomainMask)domain;
+- (GS_GENERIC_CLASS(NSArray, NSURL*)*)
+  URLsForDirectory: (NSSearchPathDirectory)directory
+  inDomains: (NSSearchPathDomainMask)domain;
 
 /**
  * Enumerate over the contents of a directory.
  */
-- (NSDirectoryEnumerator *)enumeratorAtURL: (NSURL *)url
+- (NSDirectoryEnumerator*) enumeratorAtURL: (NSURL *)url
                 includingPropertiesForKeys: (NSArray *)keys 
                                    options: (NSDirectoryEnumerationOptions)mask 
-                              errorHandler: (GSDirEnumErrorHandler)handler;
+                              errorHandler: (GSDirEnumErrorHandler)handler
+GS_NON_PORTABLE(avoid blocks APIs);
 #endif
   
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_5, GS_API_LATEST)
@@ -391,7 +395,7 @@ GS_EXPORT_CLASS
 - (NSArray*) contentsOfDirectoryAtPath: (NSString*)path error: (NSError**)error;
 
 - (NSDictionary*) attributesOfFileSystemForPath: (NSString*)path
-                                          error: (NSError**)error;
+                                          error: (NSError *_Nullable *_Nullable)error;
 #endif
 
 - (BOOL) copyPath: (NSString*)source
@@ -590,6 +594,7 @@ GS_EXPORT_CLASS
     BOOL justContents: 1;
     BOOL skipHidden: 1;
     BOOL currentIsDir: 1;
+    BOOL skipPackages: 1;
   } _flags;
 #endif
 #if     GS_NONFRAGILE

@@ -38,10 +38,13 @@ Additions_OBJC_FILES =\
 	GCObject.m \
 	GCArray.m \
 	GCDictionary.m \
+	GSBoxWeak.m \
 	GSFunctions.m \
 	GSInsensitiveDictionary.m \
 	GSMime.m \
 	GSMinHeap.m \
+	GSOperation.m \
+	GSStandaloneXMLParser.m \
 	GSURITemplate.m \
 	GSXML.m \
 	NSArray+GNUstepBase.m \
@@ -52,12 +55,14 @@ Additions_OBJC_FILES =\
 	NSDebug+GNUstepBase.m \
 	NSError+GNUstepBase.m \
 	NSHashTable+GNUstepBase.m \
+	NSHost+GNUstepBase.m \
 	NSFileHandle+GNUstepBase.m \
 	NSMutableString+GNUstepBase.m \
 	NSNumber+GNUstepBase.m \
 	NSObject+GNUstepBase.m \
 	NSPropertyList+GNUstepBase.m \
 	NSProcessInfo+GNUstepBase.m \
+	NSProgress+GNUstepBase.m \
 	NSStream+GNUstepBase.m \
 	NSString+GNUstepBase.m \
 	NSTask+GNUstepBase.m \

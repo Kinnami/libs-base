@@ -551,11 +551,12 @@ static BOOL legal_bounded(const char *str, const char *end, const char *extras)
       while (str < end)
 	{
 	  if (*str == '%' && str + 2 < end
-	    && isxdigit(str[1]) && isxdigit(str[2]))
+	    && isxdigit(((const uint8_t*)str)[1])
+	    && isxdigit(((const uint8_t*)str)[2]))
 	    {
 	      str += 3;
 	    }
-	  else if (isalnum(*str))
+	  else if (isalnum(*(const uint8_t*)str))
 	    {
 	      str++;
 	    }
@@ -599,7 +600,7 @@ static char *unescape(const char *from, char * to)
 	  unsigned char	c;
 
 	  from++;
-	  if (isxdigit(*from))
+	  if (isxdigit(*(const uint8_t*)from))
 	    {
 	      if (*from <= '9')
 		{
@@ -622,7 +623,7 @@ static char *unescape(const char *from, char * to)
 			  format: @"Bad percent escape sequence in URL string"];
 	    }
 	  c <<= 4;
-	  if (isxdigit(*from))
+	  if (isxdigit(*(const uint8_t*)from))
 	    {
 	      if (*from <= '9')
 		{
@@ -725,6 +726,11 @@ static NSUInteger	urlAlign;
 {
   // TODO: unimplemented
   return nil;
+}
+
+- (id) init
+{
+  return [self initWithString: @""];
 }
 
 - (id) initFileURLWithPath: (NSString *)aPath
@@ -952,10 +958,11 @@ static NSUInteger	urlAlign;
        * Parse the scheme if possible.
        */
       ptr = start;
-      if (isalpha(*ptr))
+      if (isalpha(*(const uint8_t*)ptr))
 	{
 	  ptr++;
-	  while (isalnum(*ptr) || *ptr == '+' || *ptr == '-' || *ptr == '.')
+	  while (isalnum(*(const uint8_t*)ptr)
+	    || *ptr == '+' || *ptr == '-' || *ptr == '.')
 	    {
 	      ptr++;
 	    }
@@ -969,9 +976,9 @@ static NSUInteger	urlAlign;
 	       */
 	      while (--ptr > start)
 		{
-		  if (isupper(*ptr))
+		  if (isupper(*(const uint8_t*)ptr))
 		    {
-		      *ptr = tolower(*ptr);
+		      *ptr = tolower(*(const uint8_t*)ptr);
 		    }
 		}
 	    }
@@ -1142,7 +1149,8 @@ static NSUInteger	urlAlign;
 		      ptr = start + 1;
 		      while (*ptr != ']')
 			{
-			  if (*ptr != ':' && *ptr != '.' && !isxdigit(*ptr))
+			  if (*ptr != ':' && *ptr != '.'
+			    && !isxdigit(*(const uint8_t*)ptr))
 			    {
 			      [NSException raise: NSInvalidArgumentException
 				format: @"[%@ %@](%@, %@) "
@@ -1169,7 +1177,9 @@ static NSUInteger	urlAlign;
 		  str = buf->port;
 		  while (*str != 0)
 		    {
-		      if (*str == '%' && isxdigit(str[1]) && isxdigit(str[2]))
+		      if (*str == '%'
+			&& isxdigit(((const uint8_t*)str)[1])
+			&& isxdigit(((const uint8_t*)str)[2]))
 			{
 			  unsigned char	c;
 
@@ -1215,7 +1225,7 @@ static NSUInteger	urlAlign;
                                 aUrlString, aBaseUrl];
 			    }
 			}
-		      else if (isdigit(*str))
+		      else if (isdigit(*(const uint8_t*)str))
 			{
 			  str++;
 			}
@@ -1777,7 +1787,117 @@ static NSUInteger	urlAlign;
                    forKey: (NSString *)key 
                     error: (NSError**)error
 {
-  // TODO: unimplemented
+  id	v;
+
+  if (0 == value)
+    {
+      value = &v;
+    }
+  *value = nil;
+
+  if (NO == [self isFileURL])
+    {
+      return NO;
+    }
+
+  if (nil == key)
+    {
+      return NO;
+    }
+
+  if ([key isEqualToString: NSURLNameKey])
+    {
+      *value = [self lastPathComponent];
+      return YES;
+    }
+  else if ([key isEqualToString: NSURLIsRegularFileKey]
+    || [key isEqualToString: NSURLIsDirectoryKey]
+    || [key isEqualToString: NSURLIsSymbolicLinkKey]
+    || [key isEqualToString: NSURLIsPackageKey]
+    || [key isEqualToString: NSURLIsHiddenKey]
+    || [key isEqualToString: NSURLCreationDateKey]
+    || [key isEqualToString: NSURLContentAccessDateKey]
+    || [key isEqualToString: NSURLContentModificationDateKey]
+    || [key isEqualToString: NSURLAttributeModificationDateKey]
+    || [key isEqualToString: NSURLFileSizeKey])
+    {
+      NSDictionary	*attributes;
+      NSString		*path = [self path];
+      NSString		*fileType;
+
+      if (nil == path)
+	{
+	  return NO;
+	}
+
+      attributes = [[NSFileManager defaultManager] fileAttributesAtPath: path
+							    traverseLink: NO];
+      if (nil == attributes)
+	{
+	  return NO;
+	}
+
+      fileType = [attributes objectForKey: NSFileType];
+      if ([key isEqualToString: NSURLIsRegularFileKey])
+	{
+	  *value = [NSNumber numberWithBool:
+	    [fileType isEqualToString: NSFileTypeRegular]];
+	  return YES;
+	}
+      else if ([key isEqualToString: NSURLIsDirectoryKey])
+	{
+	  *value = [NSNumber numberWithBool:
+	    [fileType isEqualToString: NSFileTypeDirectory]];
+	  return YES;
+	}
+      else if ([key isEqualToString: NSURLIsSymbolicLinkKey])
+	{
+	  *value = [NSNumber numberWithBool:
+	    [fileType isEqualToString: NSFileTypeSymbolicLink]];
+	  return YES;
+	}
+      else if ([key isEqualToString: NSURLIsPackageKey])
+	{
+	  NSString	*extension = [[path pathExtension] lowercaseString];
+
+	  *value = [NSNumber numberWithBool:
+	    [extension isEqualToString: @"app"]
+	    || [extension isEqualToString: @"bundle"]
+	    || [extension isEqualToString: @"framework"]
+	    || [extension isEqualToString: @"plugin"]];
+	  return YES;
+	}
+      else if ([key isEqualToString: NSURLIsHiddenKey])
+	{
+	  *value = [NSNumber numberWithBool:
+	    [[path lastPathComponent] hasPrefix: @"."]];
+	  return YES;
+	}
+      else if ([key isEqualToString: NSURLCreationDateKey])
+	{
+	  *value = [attributes objectForKey: NSFileCreationDate];
+	  return (*value != nil);
+	}
+      else if ([key isEqualToString: NSURLContentAccessDateKey])
+	{
+	  *value = [attributes objectForKey: NSFileModificationDate];
+	  return (*value != nil);
+	}
+      else if ([key isEqualToString: NSURLContentModificationDateKey])
+	{
+	  *value = [attributes objectForKey: NSFileModificationDate];
+	  return (*value != nil);
+	}
+      else if ([key isEqualToString: NSURLAttributeModificationDateKey])
+	{
+	  *value = [attributes objectForKey: NSFileModificationDate];
+	  return (*value != nil);
+	}
+
+      *value = [attributes objectForKey: NSFileSize];
+      return (*value != nil);
+    }
+
   return NO;
 }
 
@@ -2585,12 +2705,12 @@ hexToByte(char u, char l)
 {
   uint8_t	byte;
 
-  if (isupper(u))
+  if (isupper((uint8_t)u))
     byte = u - 'A' + 10;
   else
     byte = u - '0';
   byte <<= 4;
-  if (isupper(u))
+  if (isupper((uint8_t)u))
     byte |= l - 'A' + 10;
   else
     byte |= l - '0';
@@ -3145,7 +3265,7 @@ parseURL(NSString *URLString, URanges *r, BOOL encodingInvalidCharacters)
 
 	      for (i = 0; i < r->port.length; i++)
 		{
-		  if (!isdigit(p[i]))
+		  if (!isdigit(((const uint8_t*)p)[i]))
 		    {
 		      ERR(@"Bad Authority Port component - non digit found");
 		    }
@@ -3211,7 +3331,7 @@ done:
   free(start);
   if (err)
     {
-NSLog(@"%@", err);
+      NSDebugLLog(@"NSURL", @"%@, parsing %@", err, URLString);
       md = nil;
     }
 

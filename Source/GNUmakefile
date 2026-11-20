@@ -74,6 +74,9 @@ else
     libgnustep-base_SUBPROJECTS = ObjectiveC2
     OBJECTIVEC2_HEADERS += blocks_runtime.h
   endif
+  ifeq ($(OBJCAUTORELEASEPOOL),0)
+    libgnustep-base_SUBPROJECTS = ObjectiveC2
+  endif
 endif
 
 libgnustep-base_SUBPROJECTS += Additions
@@ -121,6 +124,7 @@ libgnustep-base.def
 
 GNUSTEPBASE_HEADERS = \
 GCObject.h \
+GSBoxWeak.h \
 GSBlocks.h \
 GSVersionMacros.h \
 GSObjCRuntime.h \
@@ -131,6 +135,7 @@ GSFunctions.h \
 GSLocale.h \
 GSMime.h \
 GSMinHeap.h \
+GSOperation.h \
 GSTLS.h \
 GSURITemplate.h \
 GSXML.h \
@@ -142,11 +147,13 @@ NSData+GNUstepBase.h \
 NSDebug+GNUstepBase.h \
 NSFileHandle+GNUstepBase.h \
 NSHashTable+GNUstepBase.h \
+NSHost+GNUstepBase.h \
 NSMutableString+GNUstepBase.h \
 NSNetServices+GNUstepBase.h \
 NSNumber+GNUstepBase.h \
 NSObject+GNUstepBase.h \
 NSProcessInfo+GNUstepBase.h \
+NSProgress+GNUstepBase.h \
 NSStream+GNUstepBase.h \
 NSString+GNUstepBase.h \
 NSTask+GNUstepBase.h \
@@ -175,6 +182,8 @@ GSICUString.m \
 GSOrderedSet.m \
 GSPrivateHash.m \
 GSQuickSort.m \
+GSRunLoopCtxt.m \
+GSRunLoopScheduler.m \
 GSRunLoopWatcher.m \
 GSSet.m \
 GSShellSort.m \
@@ -370,6 +379,9 @@ else
   BASE_MFILES += \
   NSKeyValueObserving.m
 endif
+
+# Works around a clang miscompile of GSPrivateFormat (see configure.ac).
+GSFormat.m_FILE_FLAGS += $(GSFORMAT_CFLAGS)
 
 ifeq ($(OBJC_RUNTIME_LIB), ng)
   BASE_MFILES += \

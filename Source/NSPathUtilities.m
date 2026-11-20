@@ -68,6 +68,8 @@
 #import "Foundation/NSProcessInfo.h"
 #import "Foundation/NSValue.h"
 #import "Foundation/NSLock.h"
+#import "Foundation/NSSet.h"
+#import "Foundation/NSTask.h"
 #import "Foundation/NSUserDefaults.h"
 #import "GNUstepBase/NSString+GNUstepBase.h"
 
@@ -76,6 +78,7 @@
 #ifdef	HAVE_PWD_H
 #include <pwd.h>		// for getpwnam_r() and getpwuid_r()
 #endif
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <stdio.h>
 
@@ -116,17 +119,15 @@ static NSString	*gnustep_is_flattened =
 #endif
 
 #if	defined(_WIN32)
-
 #include	<sddl.h>
 #include	<lmaccess.h>
-
 /*
  * FIXME ... should check access properly if the file is on an NTFS volume.
  */
 #define	ATTRMASK	0700
 #else
 #define	ATTRMASK	0777
-#endif
+#endif	/* defined(_WIN32) */
 
 #define	MGR()	[NSFileManager defaultManager]
 
@@ -140,6 +141,7 @@ static NSString *gnustepUserHome = nil;
 static NSString *gnustepUserID = nil;
 static NSString *gnustepUserName = nil;
 static NSString *gnustepUserDefaultsDir = nil;
+static NSSet	*gnustepLocalizedUserDirs = nil;
 
 static NSString *theUserName = nil;             /* The user's login name */
 static NSString *theFullUserName = nil;         /* The user's full login name */
@@ -159,6 +161,7 @@ static NSString *gnustepSystemTools = nil;
 static NSString *gnustepSystemAdminTools = nil;
 static NSString *gnustepSystemLibrary = nil;
 static NSString *gnustepSystemLibraries = nil;
+static NSString *gnustepSystemResources = nil;
 static NSString *gnustepSystemServices = nil;
 static NSString *gnustepSystemHeaders = nil;
 static NSString *gnustepSystemDocumentation = nil;
@@ -172,6 +175,7 @@ static NSString *gnustepNetworkTools = nil;
 static NSString *gnustepNetworkAdminTools = nil;
 static NSString *gnustepNetworkLibrary = nil;
 static NSString *gnustepNetworkLibraries = nil;
+static NSString *gnustepNetworkResources = nil;
 static NSString *gnustepNetworkServices = nil;
 static NSString *gnustepNetworkHeaders = nil;
 static NSString *gnustepNetworkDocumentation = nil;
@@ -185,6 +189,7 @@ static NSString *gnustepLocalTools = nil;
 static NSString *gnustepLocalAdminTools = nil;
 static NSString *gnustepLocalLibrary = nil;
 static NSString *gnustepLocalLibraries = nil;
+static NSString *gnustepLocalResources = nil;
 static NSString *gnustepLocalServices = nil;
 static NSString *gnustepLocalHeaders = nil;
 static NSString *gnustepLocalDocumentation = nil;
@@ -198,6 +203,7 @@ static NSString *gnustepUserTools = nil;
 static NSString *gnustepUserAdminTools = nil;
 static NSString *gnustepUserLibrary = nil;
 static NSString *gnustepUserLibraries = nil;
+static NSString *gnustepUserResources = nil;
 static NSString *gnustepUserServices = nil;
 static NSString *gnustepUserHeaders = nil;
 static NSString *gnustepUserDocumentation = nil;
@@ -217,16 +223,28 @@ static NSString *gnustepUserDirTools = nil;
 static NSString *gnustepUserDirAdminTools = nil;
 static NSString *gnustepUserDirLibrary = nil;
 static NSString *gnustepUserDirLibraries = nil;
+static NSString *gnustepUserDirResources = nil;
 static NSString *gnustepUserDirServices = nil;
 static NSString *gnustepUserDirHeaders = nil;
 static NSString *gnustepUserDirDocumentation = nil;
 static NSString *gnustepUserDirDocumentationInfo = nil;
 static NSString *gnustepUserDirDocumentationMan = nil;
 
+static NSString *gnustepUserDesktop = nil;
+static NSString *gnustepUserDocuments = nil;
+static NSString *gnustepUserDownloads = nil;
+static NSString *gnustepUserMusic = nil;
+static NSString *gnustepUserPictures = nil;
+static NSString *gnustepUserProjects = nil;
+static NSString *gnustepUserPublicShare = nil;
+static NSString *gnustepUserTemplates = nil;
+static NSString *gnustepUserVideos = nil;
+  
 static NSString	*uninstalled = nil;
 
 static BOOL ParseConfigurationFile(NSString *name, NSMutableDictionary *dict,
-  NSString *userName);
+  NSString *userName, BOOL allowGroup);
+static NSMutableDictionary *UserDirsParseXDG();
 
 static void InitialisePathUtilities(void);
 static void ShutdownPathUtilities(void);
@@ -300,13 +318,14 @@ lval must be casted because Clang disallows ObjC literals comparison */
 
 /* The user domain paths are normally located within the user's home directory,
  * but if they are specified as absolute paths they can be anywhere you like.
- *
  */
 #define ASSIGN_USER_PATH(var, val) ({\
   if (nil == var) \
     {\
-      ASSIGN(var, ([val isAbsolutePath] ? substUser(val) : \
-        [gnustepUserHome stringByAppendingPathComponent: substUser(val)]));\
+      NSString	*tmp = ([val isAbsolutePath] ? substUser(val) : \
+        [gnustepUserHome stringByAppendingPathComponent: substUser(val)]);\
+      tmp = [tmp stringByStandardizingPath]; \
+      ASSIGN(var, tmp); \
     }\
   })
 
@@ -442,10 +461,13 @@ getPathConfig(NSDictionary *dict, NSString *key)
   return path;
 }
 
-static void ExtractValuesFromConfig(NSDictionary *config)
+static void
+ExtractValuesFromConfig(NSDictionary *config)
 {
   NSMutableDictionary	*c = [config mutableCopy];
   BOOL			createLibraryPath;
+  NSMutableDictionary	*xdg;
+  NSMutableSet		*loc;
   id		        extra;
 
   /*
@@ -481,6 +503,8 @@ static void ExtractValuesFromConfig(NSDictionary *config)
     @"GNUSTEP_SYSTEM_LIBRARY");
   ASSIGN_PATH(gnustepSystemLibraries, c,
     @"GNUSTEP_SYSTEM_LIBRARIES");
+  ASSIGN_PATH(gnustepSystemResources, c,
+    @"GNUSTEP_SYSTEM_RESOURCES");
   ASSIGN_PATH(gnustepSystemServices, c,
     @"GNUSTEP_SYSTEM_SERVICES");
   ASSIGN_PATH(gnustepSystemHeaders, c,
@@ -506,6 +530,8 @@ static void ExtractValuesFromConfig(NSDictionary *config)
     @"GNUSTEP_NETWORK_LIBRARY");
   ASSIGN_PATH(gnustepNetworkLibraries, c,
     @"GNUSTEP_NETWORK_LIBRARIES");
+  ASSIGN_PATH(gnustepNetworkResources, c,
+    @"GNUSTEP_NETWORK_RESOURCES");
   ASSIGN_PATH(gnustepNetworkServices, c,
     @"GNUSTEP_NETWORK_SERVICES");
   ASSIGN_PATH(gnustepNetworkHeaders, c,
@@ -531,6 +557,8 @@ static void ExtractValuesFromConfig(NSDictionary *config)
     @"GNUSTEP_LOCAL_LIBRARY");
   ASSIGN_PATH(gnustepLocalLibraries, c,
     @"GNUSTEP_LOCAL_LIBRARIES");
+  ASSIGN_PATH(gnustepLocalResources, c,
+    @"GNUSTEP_LOCAL_RESOURCES");
   ASSIGN_PATH(gnustepLocalServices, c,
     @"GNUSTEP_LOCAL_SERVICES");
   ASSIGN_PATH(gnustepLocalHeaders, c,
@@ -570,6 +598,10 @@ static void ExtractValuesFromConfig(NSDictionary *config)
     @"GNUSTEP_USER_DIR_LIBRARIES");
   TEST_ASSIGN(gnustepUserDirLibraries,
     @GNUSTEP_TARGET_USER_DIR_LIBRARIES);
+  ASSIGN_USER(gnustepUserDirResources, c,
+    @"GNUSTEP_USER_DIR_RESOURCES");
+  TEST_ASSIGN(gnustepUserDirResources,
+    @GNUSTEP_TARGET_USER_DIR_RESOURCES);
   ASSIGN_USER(gnustepUserDirServices, c,
     @"GNUSTEP_USER_DIR_SERVICES");
   TEST_ASSIGN(gnustepUserDirServices,
@@ -590,6 +622,43 @@ static void ExtractValuesFromConfig(NSDictionary *config)
     @"GNUSTEP_USER_DIR_DOC_INFO");
   TEST_ASSIGN(gnustepUserDirDocumentationInfo,
     @GNUSTEP_TARGET_USER_DIR_DOC_INFO);
+
+  /* Check for user subdirectories.  Ones from the GNUstep file are added
+   * second, so they override the XDG ones.
+   * We record the names of these directories as they are localised already.
+   */
+  xdg = UserDirsParseXDG();
+  loc = [NSMutableSet set];
+
+#define SET_USER_DIR(var, key) ({\
+  NSString	*tmp; \
+  if ((tmp = [xdg objectForKey: @"XDG_"#key]) == nil) \
+    { \
+      if ((tmp = [c objectForKey: @"GNUSTEP_"#key]) != nil) \
+	{ \
+	  tmp = ([tmp isAbsolutePath] ? substUser(tmp) : \
+	    [gnustepUserHome stringByAppendingPathComponent: substUser(tmp)]); \
+	} \
+    } \
+  if (tmp) \
+    { \
+      tmp = [tmp stringByStandardizingPath]; \
+      ASSIGN(var, tmp); \
+      [loc addObject: var]; \
+    } \
+})
+
+  SET_USER_DIR(gnustepUserDesktop, DESKTOP_DIR);
+  SET_USER_DIR(gnustepUserDocuments, DOCUMENTS_DIR);
+  SET_USER_DIR(gnustepUserDownloads, DOWNLOAD_DIR);
+  SET_USER_DIR(gnustepUserMusic, MUSIC_DIR);
+  SET_USER_DIR(gnustepUserPictures, PICTURES_DIR);
+  SET_USER_DIR(gnustepUserProjects, PROJECTS_DIR);
+  SET_USER_DIR(gnustepUserPublicShare, PUBLICSHARE_DIR);
+  SET_USER_DIR(gnustepUserTemplates, TEMPLATES_DIR);
+  SET_USER_DIR(gnustepUserVideos, VIDEOS_DIR);
+
+  ASSIGNCOPY(gnustepLocalizedUserDirs, loc);
 
   /*
    * The GNUSTEP_EXTRA field may contain a list of extra keys which
@@ -651,46 +720,58 @@ static void ExtractValuesFromConfig(NSDictionary *config)
    */
   if (gnustepUserDefaultsDir == nil)
     {
-      ASSIGN(gnustepUserDefaultsDir, @GNUSTEP_TARGET_USER_DEFAULTS_DIR);
+      ASSIGN(gnustepUserDefaultsDir,
+	@GNUSTEP_TARGET_USER_DEFAULTS_DIR);
     }
   if (gnustepUserDirApps == nil)
     {
-      ASSIGN(gnustepUserDirApps, @GNUSTEP_TARGET_USER_DIR_APPS);
+      ASSIGN(gnustepUserDirApps,
+	@GNUSTEP_TARGET_USER_DIR_APPS);
     }
   if (gnustepUserDirTools == nil)
     {
-      ASSIGN(gnustepUserDirTools, @GNUSTEP_TARGET_USER_DIR_TOOLS);
+      ASSIGN(gnustepUserDirTools,
+	@GNUSTEP_TARGET_USER_DIR_TOOLS);
     }
   if (gnustepUserDirLibrary == nil)
     {
-      ASSIGN(gnustepUserDirLibrary, @GNUSTEP_TARGET_USER_DIR_LIBRARY);
+      ASSIGN(gnustepUserDirLibrary,
+	@GNUSTEP_TARGET_USER_DIR_LIBRARY);
     }
   if (gnustepUserDirLibraries == nil)
     {
-      ASSIGN(gnustepUserDirLibraries, @GNUSTEP_TARGET_USER_DIR_LIBRARIES);
+      ASSIGN(gnustepUserDirLibraries,
+	@GNUSTEP_TARGET_USER_DIR_LIBRARIES);
+    }
+  if (gnustepUserDirResources == nil)
+    {
+      ASSIGN(gnustepUserDirResources,
+	@GNUSTEP_TARGET_USER_DIR_RESOURCES);
     }
   if (gnustepUserDirServices == nil)
     {
-      ASSIGN(gnustepUserDirServices, @GNUSTEP_TARGET_USER_DIR_SERVICES);
+      ASSIGN(gnustepUserDirServices,
+	@GNUSTEP_TARGET_USER_DIR_SERVICES);
     }
   if (gnustepUserDirHeaders == nil)
     {
-      ASSIGN(gnustepUserDirHeaders, @GNUSTEP_TARGET_USER_DIR_HEADERS);
+      ASSIGN(gnustepUserDirHeaders,
+	@GNUSTEP_TARGET_USER_DIR_HEADERS);
     }
   if (gnustepUserDirDocumentation == nil)
     {
       ASSIGN(gnustepUserDirDocumentation,
-	     @GNUSTEP_TARGET_USER_DIR_DOC);
+	@GNUSTEP_TARGET_USER_DIR_DOC);
     }
   if (gnustepUserDirDocumentationMan == nil)
     {
       ASSIGN(gnustepUserDirDocumentationMan,
-	     @GNUSTEP_TARGET_USER_DIR_DOC_MAN);
+	@GNUSTEP_TARGET_USER_DIR_DOC_MAN);
     }
   if (gnustepUserDirDocumentationInfo == nil)
     {
       ASSIGN(gnustepUserDirDocumentationInfo,
-	     @GNUSTEP_TARGET_USER_DIR_DOC_INFO);
+	@GNUSTEP_TARGET_USER_DIR_DOC_INFO);
     }
 
   /*
@@ -704,6 +785,7 @@ static void ExtractValuesFromConfig(NSDictionary *config)
   ASSIGN_USER_PATH(gnustepUserAdminTools, gnustepUserDirAdminTools);
   ASSIGN_USER_PATH(gnustepUserLibrary, gnustepUserDirLibrary);
   ASSIGN_USER_PATH(gnustepUserLibraries, gnustepUserDirLibraries);
+  ASSIGN_USER_PATH(gnustepUserResources, gnustepUserDirResources);
   ASSIGN_USER_PATH(gnustepUserServices, gnustepUserDirServices);
   ASSIGN_USER_PATH(gnustepUserHeaders, gnustepUserDirHeaders);
   ASSIGN_USER_PATH(gnustepUserDocumentation, gnustepUserDocumentation);
@@ -753,6 +835,8 @@ static void ExtractValuesFromConfig(NSDictionary *config)
     @GNUSTEP_TARGET_SYSTEM_LIBRARY);
   ASSIGN_DEFAULT_PATH(gnustepSystemLibraries,
     @GNUSTEP_TARGET_SYSTEM_LIBRARIES);
+  ASSIGN_DEFAULT_PATH(gnustepSystemResources,
+    @GNUSTEP_TARGET_SYSTEM_RESOURCES);
   ASSIGN_DEFAULT_PATH(gnustepSystemServices,
     @GNUSTEP_TARGET_SYSTEM_SERVICES);
   ASSIGN_DEFAULT_PATH(gnustepSystemHeaders,
@@ -778,6 +862,8 @@ static void ExtractValuesFromConfig(NSDictionary *config)
     @GNUSTEP_TARGET_NETWORK_LIBRARY);
   ASSIGN_DEFAULT_PATH(gnustepNetworkLibraries,
     @GNUSTEP_TARGET_NETWORK_LIBRARIES);
+  ASSIGN_DEFAULT_PATH(gnustepNetworkResources,
+    @GNUSTEP_TARGET_NETWORK_RESOURCES);
   ASSIGN_DEFAULT_PATH(gnustepNetworkServices,
     @GNUSTEP_TARGET_NETWORK_SERVICES);
   ASSIGN_DEFAULT_PATH(gnustepNetworkHeaders,
@@ -821,7 +907,27 @@ static void ExtractValuesFromConfig(NSDictionary *config)
     @GNUSTEP_TARGET_NETWORK_USERS_DIR);
   ASSIGN_DEFAULT_PATH(gnustepLocalUsersDir,
     @GNUSTEP_TARGET_LOCAL_USERS_DIR);
+
 }
+
+#if	defined(__ANDROID__)
+NSString *
+GSPrivateAndroidToolsDirectory(void)
+{
+  static NSString	*dir = nil;
+
+  if (nil == dir)
+    {
+      NSString	*path = GSPrivateSymbolPath([NSProcessInfo class]);
+
+      if ([path length] > 0)
+	{
+	  dir = [[path stringByDeletingLastPathComponent] copy];
+	}
+    }
+  return dir;
+}
+#endif
 
 static void
 addDefaults(NSString *defs, NSMutableDictionary *conf)
@@ -1099,7 +1205,7 @@ GNUstepConfig(NSDictionary *newConfig)
 			[gnustepConfigPath UTF8String],
 			[[file lastPathComponent] UTF8String]);
 		    }
-		  if (ParseConfigurationFile(file, conf, nil)
+		  if (ParseConfigurationFile(file, conf, nil, NO)
 		    && GSDebugSet(debugKey))
 		    {
 		      fprintf(stderr, "Configuration contained '%s'\n",
@@ -1231,7 +1337,7 @@ GNUstepUserConfig(NSMutableDictionary *config, NSString *userName)
 		[file UTF8String], [home UTF8String]);
 	    }
 	  dict = [NSMutableDictionary new];
-	  if (ParseConfigurationFile(path, dict, userName))
+	  if (ParseConfigurationFile(path, dict, userName, NO))
 	    {
 	      /* Don't let the user file override the GNUSTEP_USER_CONFIG_FILE
 	       * variable ... that would be silly/pointless.
@@ -1425,11 +1531,14 @@ static void ShutdownPathUtilities(void)
  * strings to avoid having to double all occurrences of the backslash.<br />
  * Returns a dictionary of the (key,value) pairs.<br />
  * If the file does not exist,
- * the function makes no changes to dict and returns NO.
+ * the function makes no changes to dict and returns NO.<br />
+ * The allowGroup flag may be set to indicate that the file may be editable
+ * by members of the owner's group (umask() permitting), otherwise it must
+ * be strictly writable only by its owner.
  */
 static BOOL
 ParseConfigurationFile(NSString *fileName, NSMutableDictionary *dict,
-  NSString *userName)
+  NSString *userName, BOOL allowGroup)
 {
   NSDictionary	*attributes;
   NSString      *file;
@@ -1443,6 +1552,8 @@ ParseConfigurationFile(NSString *fileName, NSMutableDictionary *dict,
   BOOL		wantKey = YES;
   BOOL		wantVal = NO;
   NSString	*key = nil;
+  unsigned	mask = 0022;
+  unsigned	perm;
 
   if ([MGR() isReadableFileAtPath: fileName] == NO)
     {
@@ -1474,18 +1585,39 @@ ParseConfigurationFile(NSString *fileName, NSMutableDictionary *dict,
           return NO;
 	}
     }
-  if (([attributes filePosixPermissions] & (0022 & ATTRMASK)) != 0)
+  perm = (unsigned)[attributes filePosixPermissions];
+  if (allowGroup)
     {
 #if defined(_WIN32)
+      mask = 0002;
+#else
+      if ((umask(0) & 0020) == 0)
+	{
+	  /* The process mask and the flag both allow group members to
+	   * write to the file.
+	   */
+	  mask = 0002;
+	}
+      else
+	{
+	  allowGroup = NO;
+	}
+#endif
+    }
+  if ((perm & (mask & ATTRMASK)) != 0)
+   {
+#if defined(_WIN32)
       fprintf(stderr, "The file '%S' is writable by someone other than"
-	" its owner (permissions 0%lo).\nIgnoring it.\n",
+	" its owner%s (permissions 0%lo).\nIgnoring it.\n",
 	[fileName fileSystemRepresentation],
-        (long)[attributes filePosixPermissions]);
+	(allowGroup ? " and group" : ""),
+	(long)[attributes filePosixPermissions]);
 #else
       fprintf(stderr, "The file '%s' is writable by someone other than"
-	" its owner (permissions 0%lo).\nIgnoring it.\n",
+	" its owner%s (permissions 0%lo).\nIgnoring it.\n",
 	[fileName fileSystemRepresentation],
-        (long)[attributes filePosixPermissions]);
+	(allowGroup ? " and group" : ""),
+	(long)[attributes filePosixPermissions]);
 #endif
       return NO;
     }
@@ -1719,6 +1851,98 @@ ParseConfigurationFile(NSString *fileName, NSMutableDictionary *dict,
   return YES;
 }
 
+/* Get the contents of the XDG specification of well-known subdirectory
+ * names if available.
+ */
+static NSMutableDictionary *
+UserDirsParseXDG()
+{
+  NSDictionary		*env = [[NSProcessInfo processInfo] environment];
+  NSMutableDictionary	*info;
+  NSArray		*keys;
+  NSString		*fileName;
+  NSString		*userName;
+  NSString		*path;
+  NSString		*home;
+
+  home = [env objectForKey: @"HOME"];
+  if (nil == home)
+    {
+      home = NSHomeDirectory();
+    }
+
+  /* The XDG configuration lives in $XDG_CONFIG_HOME or $HOME/.config
+   */
+  if (nil == (path = [env objectForKey: @"XDG_CONFIG_HOME"]))
+    {
+      path = [home stringByAppendingPathComponent: @".config"];
+    }
+  fileName = [path stringByAppendingPathComponent: @"user-dirs.dirs"];
+
+#if 0
+  /* Every bit of documentation I've found says that the login process
+   * should run this tool before the user is logged in, so it should not
+   * need to be run by us.  However, Riccardo says that sometimes he sees
+   * systems where it hasn't been run.  I guess the question is whether
+   * there was something wrong on those systems that this would fix, or
+   * if it was just that xdg was uninstalled or switched off (so we should
+   * not be using it).
+   */
+  if ([[NSFileManager defaultManager] fileExistsAtPath: fileName] == NO)
+    {
+      NSTask	*task = [NSTask new];
+      NSString	*path;
+
+      [task setLaunchPath: @"xdg-user-dirs-update"];
+      [task setEnvironment: env];
+      if ((path = [task validatedLaunchPath]) != nil)
+	{
+	  [task setStandardOutput: [NSFileHandle fileHandleWithNullDevice]]; 
+	  [task setStandardError: [NSFileHandle fileHandleWithNullDevice]]; 
+	  [task launch];
+	  [task waitUntilExit];
+	}
+      RELEASE(task);
+    }
+#endif
+
+  /* Use ParseConfigurationFile() to check that the XDG config is safe and
+   * to extract the key/value pairs from it.
+   */
+  userName = NSUserName();
+  info = [NSMutableDictionary dictionary];
+  if (NO == ParseConfigurationFile(fileName, info, userName, YES))
+    {
+      [info removeAllObjects];
+    }
+
+  /* Now map XDG name/value pairs to GNUstep names with absolute
+   * strings as dictionaries.
+   */
+  keys = [info allKeys];
+  GS_FOR_IN(NSString*, key, keys)
+  if ([key hasPrefix: @"XDG_"] && [key hasSuffix: @"_DIR"])
+    {
+      NSString	*value = [info objectForKey: key];
+
+      if ([value isEqualToString: @"$HOME"])
+	{
+	  value = home;
+	}
+      else if ([value hasPrefix: @"$HOME/"])
+	{
+	  value = [home stringByAppendingPathComponent:
+	    [value substringFromIndex: 6]];
+	}
+      [info setObject: value forKey: key];
+    }
+  else
+    {
+      [info removeObjectForKey: key];
+    }
+  GS_END_FOR(keys)
+  return info;
+}
 
 /* See NSPathUtilities.h for description */
 GS_DECLARE void
@@ -1884,7 +2108,8 @@ NSHomeDirectoryForUser(NSString *loginName)
     {
       s = [[NSProcessInfo processInfo] androidFilesDir];
     }
-#elif !defined(_WIN32)
+#endif
+#if !defined(_WIN32)
 #if     defined(HAVE_GETPWNAM_R)
   if (nil == s)
     {
@@ -1972,7 +2197,8 @@ NSFullUserName(void)
 {
   if (theFullUserName == nil)
     {
-      NSString	*userName = NSUserName();
+      NSString	*loginName = NSUserName();
+      NSString	*userName = loginName;
       int	length;
 #if defined(_WIN32)
       struct _USER_INFO_2	*userInfo;
@@ -1997,12 +2223,10 @@ NSFullUserName(void)
       struct passwd *p;
       char buf[BUFSIZ*10];
 
-      if (getpwnam_r([userName cString], &pw, buf, sizeof(buf), &p) == 0)
+      if (getpwnam_r([userName cString], &pw, buf, sizeof(buf), &p) == 0
+	&& p != 0 && pw.pw_gecos != 0 && *pw.pw_gecos)
         {
-	  if (*pw.pw_gecos)
-	    {
-              userName = [NSString stringWithUTF8String: pw.pw_gecos];
-	    }
+          userName = [NSString stringWithUTF8String: pw.pw_gecos];
         }
 #endif /* HAVE_PW_GECOS_IN_PASSWD */
 #else
@@ -2035,6 +2259,14 @@ NSFullUserName(void)
 	      userName = [userName substringToIndex: --length];
 	      userName = [userName stringByTrimmingSpaces];
 	    }
+	}
+      /* An account may hold no name at all, only the separators between the
+       * fields where one would be, in which case the name the user logs in
+       * under is the only name there is.
+       */
+      if ([userName length] == 0)
+	{
+	  userName = loginName;
 	}
       ASSIGN(theFullUserName, userName);
     }
@@ -2086,6 +2318,16 @@ GSDefaultsRootForUser(NSString *userName)
     }
 
   return defaultsDir;
+}
+
+GS_DECLARE NSSet *
+GSLocalizedUserDirs()
+{
+  NSSet	*s;
+  [GSPrivateGlobalLock() lock];
+  s = RETAIN(gnustepLocalizedUserDirs);
+  [GSPrivateGlobalLock() unlock];
+  return AUTORELEASE(s);
 }
 
 GS_DECLARE NSArray *
@@ -2143,8 +2385,8 @@ NSTemporaryDirectory(void)
 #endif
 
   /*
-   * If the user has supplied a directory name in the TEMP or TMP
-   * environment variable, attempt to use that unless we already
+   * If the user has supplied a directory name in the TEMP, TMP or
+   * TMPDIR environment variable, attempt to use that unless we already
    * have a temporary directory specified.
    */
   if (baseTempDirName == nil)
@@ -2155,23 +2397,27 @@ NSTemporaryDirectory(void)
       if (baseTempDirName == nil)
 	{
 	  baseTempDirName = [env objectForKey: @"TMP"];
-	  if (baseTempDirName == nil)
-	    {
+	}
+      if (baseTempDirName == nil)
+	{
+	  baseTempDirName = [env objectForKey: @"TMPDIR"];
+	}
+      if (baseTempDirName == nil)
+	{
 #if	defined(__CYGWIN__)
 #warning Basing temporary directory in /cygdrive/c; any reason?
-	      baseTempDirName = @"/cygdrive/c/";
+	  baseTempDirName = @"/cygdrive/c/";
 #elif	defined(_WIN32)
-	      baseTempDirName = @"C:\\";
+	  baseTempDirName = @"C:\\";
 #elif   defined(__APPLE__)
-	      /*
-	       * Create temporary directory on /var/tmp since /tmp is
-	       * cleaned regularly on Darwin by default
-	       */
-	      baseTempDirName = @"/var/tmp";
+	  /*
+	   * Create temporary directory on /var/tmp since /tmp is
+	   * cleaned regularly on Darwin by default
+	   */
+	  baseTempDirName = @"/var/tmp";
 #else
-	      baseTempDirName = @"/tmp";
+	  baseTempDirName = @"/tmp";
 #endif
-	    }
 	}
     }
 
@@ -2374,7 +2620,8 @@ NSSearchPathForDirectoriesInDomains(NSSearchPathDirectory directoryKey,
 #define ADD_PATH(mask, base_dir, add_dir) \
 if (domainMask & mask) \
 { \
-  path = [base_dir stringByAppendingPathComponent: add_dir]; \
+  if ([add_dir isAbsolutePath]) path = add_dir; \
+  else path = [base_dir stringByAppendingPathComponent: add_dir]; \
   if ([path length] > 0 && [paths containsObject: path] == NO) \
     [paths addObject: path]; \
 }
@@ -2441,7 +2688,9 @@ if (domainMask & mask) \
 
       case NSDesktopDirectory:
 	{
-	  ADD_PATH(NSUserDomainMask, gnustepUserHome, @"Desktop");
+	  if (nil == gnustepUserDesktop) gnustepUserDesktop
+	    = @"Desktop";
+	  ADD_PATH(NSUserDomainMask, gnustepUserHome, gnustepUserDesktop);
 	}
 	break;
 
@@ -2633,14 +2882,16 @@ L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\GNUstep",
 	   * verified on Macintosh
 	   * despite the name it is Documents and not Document....
 	   */
-	  ADD_PATH(NSUserDomainMask, gnustepUserHome, @"Documents");
+	  if (nil == gnustepUserDocuments) gnustepUserDocuments = @"Documents";
+	  ADD_PATH(NSUserDomainMask, gnustepUserHome, gnustepUserDocuments);
 	}
 	break;
 
       case NSDownloadsDirectory:
 	{
 	  /* Be consistent with NSDocumentDirectory */
-	  ADD_PATH(NSUserDomainMask, gnustepUserHome, @"Downloads");
+	  if (nil == gnustepUserDownloads) gnustepUserDownloads = @"Downloads";
+	  ADD_PATH(NSUserDomainMask, gnustepUserHome, gnustepUserDownloads);
 	}
 	break;
 	
@@ -2653,21 +2904,24 @@ L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\GNUstep",
       case NSMoviesDirectory:
 	{
 	  /* Be consistent with NSDocumentDirectory */
-	  ADD_PATH(NSUserDomainMask, gnustepUserHome, @"Videos");
+	  if (nil == gnustepUserVideos) gnustepUserVideos = @"Videos";
+	  ADD_PATH(NSUserDomainMask, gnustepUserHome, gnustepUserVideos);
 	}
 	break;
 
       case NSMusicDirectory:
 	{
 	  /* Be consistent with NSDocumentDirectory */
-	  ADD_PATH(NSUserDomainMask, gnustepUserHome, @"Music");
+	  if (nil == gnustepUserMusic) gnustepUserMusic = @"Music";
+	  ADD_PATH(NSUserDomainMask, gnustepUserHome, gnustepUserMusic);
 	}
 	break;
 
       case NSPicturesDirectory:
 	{
 	  /* Be consistent with NSDocumentDirectory */
-	  ADD_PATH(NSUserDomainMask, gnustepUserHome, @"Images");
+	  if (nil == gnustepUserPictures) gnustepUserPictures = @"Images";
+	  ADD_PATH(NSUserDomainMask, gnustepUserHome, gnustepUserPictures);
 	}
 	break;
 
@@ -2679,7 +2933,8 @@ L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\GNUstep",
 
       case NSSharedPublicDirectory:
 	{
-	  ADD_PATH(NSUserDomainMask, gnustepUserHome, @"Public");
+	  if (nil == gnustepUserPublicShare) gnustepUserPublicShare = @"Public";
+	  ADD_PATH(NSUserDomainMask, gnustepUserHome, gnustepUserPublicShare);
 	}
 	break;
 
@@ -2808,6 +3063,21 @@ L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\GNUstep",
 		}
 	    }
 
+#if	defined(__ANDROID__)
+	  /* Android mounts the directory an application may write with the
+	   * noexec option, and installs the executable files a package carries
+	   * into a directory of its own whose name is settled when the package
+	   * is installed.  A layout cannot name that directory, so it is added
+	   * here: it is the directory this library was loaded from.  It comes
+	   * first because a file of the same name below it is on the writable
+	   * directory and cannot be started.  The directories below are kept,
+	   * because a tool built and installed outside a package is in one of
+	   * them.
+	   */
+	  ADD_PLATFORM_PATH(NSSystemDomainMask,
+	    GSPrivateAndroidToolsDirectory());
+#endif
+
 	  ADD_PLATFORM_PATH(NSUserDomainMask, gnustepUserTools);
 	  if (full)
 	    ADD_PATH(NSUserDomainMask, gnustepUserTools, full);
@@ -2850,6 +3120,11 @@ L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\GNUstep",
 		}
 	    }
 
+#if	defined(__ANDROID__)
+	  ADD_PLATFORM_PATH(NSSystemDomainMask,
+	    GSPrivateAndroidToolsDirectory());
+#endif
+
 	  ADD_PLATFORM_PATH(NSUserDomainMask, gnustepUserAdminTools);
 	  if (full)
 	    ADD_PATH(NSUserDomainMask, gnustepUserAdminTools, full);
@@ -2884,6 +3159,20 @@ L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\GNUstep",
 	  ADD_PLATFORM_PATH(NSSystemDomainMask, gnustepSystemWebApps);
 	}
 	break;
+
+      case GSResourcesDirectory:
+	{
+	  ADD_PLATFORM_PATH(NSUserDomainMask, gnustepUserResources);
+	  ADD_PLATFORM_PATH(NSLocalDomainMask, gnustepLocalResources);
+	  ADD_PLATFORM_PATH(NSNetworkDomainMask, gnustepNetworkResources);
+	  ADD_PLATFORM_PATH(NSSystemDomainMask, gnustepSystemResources);
+	}
+	break;
+
+/* Values in XDG but not GNUstep yet
+	if (nil == gnustepUserProjects) gnustepUserProjects = @"Projects";
+	if (nil == gnustepUserTemplates) gnustepUserTemplates = @"Templates";
+*/
     }
 
 #undef ADD_PATH

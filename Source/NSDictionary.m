@@ -31,6 +31,7 @@
 #import "Foundation/NSEnumerator.h"
 #import "Foundation/NSOrderedSet.h"
 #import "Foundation/NSData.h"
+#import "Foundation/NSPropertyList.h"
 #import "Foundation/NSException.h"
 #import "Foundation/NSAutoreleasePool.h"
 #import "Foundation/NSFileManager.h"
@@ -160,8 +161,11 @@ static SEL	appSel;
 - (void) enumerateKeysAndObjectsUsingBlock:
   (GSKeysAndObjectsEnumeratorBlock)aBlock
 {
+#pragma GCC diagnostic push 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   [self enumerateKeysAndObjectsWithOptions: 0
                                 usingBlock: aBlock];
+#pragma GCC diagnostic pop 
 }
 
 - (void) enumerateKeysAndObjectsWithOptions: (NSEnumerationOptions)opts
@@ -636,24 +640,23 @@ static SEL	appSel;
  * <p>Initialises the dictionary with the contents of the specified file,
  * which must contain a dictionary in property-list format.
  * </p>
- * <p>In GNUstep, the property-list format may be either the OpenStep
- * format (ASCII data), or the MacOS-X format (UTF-8 XML data) ... this
- * method will recognise which it is.
+ * <p>The property list may be in any format NSPropertyListSerialization
+ * reads: binary, XML or OpenStep ... this method recognises which it is.
  * </p>
  * <p>If there is a failure to load the file for any reason, the receiver
  * will be released and the method will return nil.
  * </p>
- * <p>Works by invoking [NSString-initWithContentsOfFile:] and
- * [NSString-propertyList] then checking that the result is a dictionary.
+ * <p>Works by reading the data and parsing it with
+ * [NSPropertyListSerialization+propertyListWithData:options:format:error:]
+ * then checking that the result is a dictionary.
  * </p>
  */
 - (id) initWithContentsOfFile: (NSString*)path
 {
-  NSString 	*myString;
+  NSData	*data;
 
-  myString = [[NSString allocWithZone: NSDefaultMallocZone()]
-    initWithContentsOfFile: path];
-  if (myString == nil)
+  data = [NSData dataWithContentsOfFile: path];
+  if (data == nil)
     {
       DESTROY(self);
     }
@@ -661,16 +664,19 @@ static SEL	appSel;
     {
       id result;
 
+      /* Any format: the data says which (binary, XML or OpenStep). */
       NS_DURING
 	{
-	  result = [myString propertyList];
+	  result = [NSPropertyListSerialization propertyListWithData: data
+	    options: NSPropertyListImmutable
+	    format: NULL
+	    error: NULL];
 	}
       NS_HANDLER
 	{
           result = nil;
 	}
       NS_ENDHANDLER
-      RELEASE(myString);
       if ([result isKindOfClass: NSDictionaryClass])
 	{
 	  self = [self initWithDictionary: result];
@@ -689,24 +695,23 @@ static SEL	appSel;
  * <p>Initialises the dictionary with the contents of the specified URL,
  * which must contain a dictionary in property-list format.
  * </p>
- * <p>In GNUstep, the property-list format may be either the OpenStep
- * format (ASCII data), or the MacOS-X format (UTF-8 XML data) ... this
- * method will recognise which it is.
+ * <p>The property list may be in any format NSPropertyListSerialization
+ * reads: binary, XML or OpenStep ... this method recognises which it is.
  * </p>
  * <p>If there is a failure to load the URL for any reason, the receiver
  * will be released and the method will return nil.
  * </p>
- * <p>Works by invoking [NSString-initWithContentsOfURL:] and
- * [NSString-propertyList] then checking that the result is a dictionary.
+ * <p>Works by reading the data and parsing it with
+ * [NSPropertyListSerialization+propertyListWithData:options:format:error:]
+ * then checking that the result is a dictionary.
  * </p>
  */
 - (id) initWithContentsOfURL: (NSURL*)aURL
 {
-  NSString 	*myString;
+  NSData	*data;
 
-  myString = [[NSString allocWithZone: NSDefaultMallocZone()]
-    initWithContentsOfURL: aURL];
-  if (myString == nil)
+  data = [NSData dataWithContentsOfURL: aURL];
+  if (data == nil)
     {
       DESTROY(self);
     }
@@ -714,16 +719,19 @@ static SEL	appSel;
     {
       id result;
 
+      /* Any format: the data says which (binary, XML or OpenStep). */
       NS_DURING
 	{
-	  result = [myString propertyList];
+	  result = [NSPropertyListSerialization propertyListWithData: data
+	    options: NSPropertyListImmutable
+	    format: NULL
+	    error: NULL];
 	}
       NS_HANDLER
 	{
           result = nil;
 	}
       NS_ENDHANDLER
-      RELEASE(myString);
       if ([result isKindOfClass: NSDictionaryClass])
 	{
 	  self = [self initWithDictionary: result];
@@ -788,21 +796,53 @@ static SEL	appSel;
     {
       if (count > 0)
 	{
-	  NSEnumerator	*e = [self keyEnumerator];
-	  IMP		nxtObj = [e methodForSelector: nxtSel];
-	  IMP		myObj = [self methodForSelector: objSel];
-	  IMP		otherObj = [other methodForSelector: objSel];
-	  id		k;
+	  IMP	otherObj = [other methodForSelector: objSel];
 
-	  while ((k = (*nxtObj)(e, @selector(nextObject))) != nil)
+	  if (count <= 4)
 	    {
-	      id o1 = (*myObj)(self, objSel, k);
-	      id o2 = (*otherObj)(other, objSel, k);
+	      /* For small dictionaries the overhead of hash table lookups are
+	       * significant and it's quicker to just compare the dictionary
+	       * contents in arrays on the stack.
+	       * The threshold for performance switchover is a bit of a guess.
+	       */
+	      int	i;
+	      id	keys[count];
+	      id	objs[count];
 
-	      if (o1 == o2)
-		continue;
-	      if ([o1 isEqual: o2] == NO)
-		return NO;
+	      [self getObjects: objs andKeys: keys count: count];
+
+	      for (i = 0; i < count; i++)
+		{
+		  id	k = keys[i];
+		  id	o = (*otherObj)(other, objSel, k);
+
+		  if (nil == o || NO == [objs[i] isEqual: o])
+		    {
+		      return NO;
+		    }
+		}
+	    }
+	  else
+	    {
+	      /* For larger dictionaries we need to use the hash table lookup
+	       * to find dictionary values matching keys, so we use fast
+	       * enumeration to go through all the keys in one dictionary and
+	       * we cache the lookup method implementations to avoid message
+	       * overhead and have after lookup.
+	       */
+	      IMP	myObj = [self methodForSelector: objSel];
+
+	      GS_FOR_IN(id, k, self)
+		{
+		  id o1 = (*myObj)(self, objSel, k);
+		  id o2 = (*otherObj)(other, objSel, k);
+
+		  if (nil == o2 || NO == [o1 isEqual: o2])
+		    {
+		      return NO;
+		    }
+		}
+	      GS_END_FOR(self)
 	    }
 	}
       return YES;
@@ -831,7 +871,7 @@ static SEL	appSel;
 
       for (i = 0; i < c; i++)
 	{
-	  k[i] = (*nxtObj)(e, nxtSel);
+	  k[i] = ((id (*)(id, SEL))nxtObj)(e, nxtSel);
 	  NSAssert (k[i], NSInternalInconsistencyException);
 	}
       result = [[NSArray_class allocWithZone: NSDefaultMallocZone()]
@@ -862,7 +902,7 @@ static SEL	appSel;
 
       for (i = 0; i < c; i++)
 	{
-	  k[i] = (*nxtObj)(e, nxtSel);
+	  k[i] = ((id (*)(id, SEL))nxtObj)(e, nxtSel);
 	}
       result = [[NSArray_class allocWithZone: NSDefaultMallocZone()]
 	initWithObjects: k count: c];
@@ -872,14 +912,76 @@ static SEL	appSel;
 }
 
 - (void) getObjects: (__unsafe_unretained id[])objects
-            andKeys: (__unsafe_unretained id<NSCopying>[])keys
+            andKeys: (__unsafe_unretained id[])keys
+	      count: (NSUInteger)max
 {
-  NSUInteger i = 0;
-  GS_FOR_IN(id, key, self)
-    if (keys != NULL) keys[i] = key;
-    if (objects != NULL) objects[i] = [self objectForKey: key];
-    i++;
-  GS_END_FOR(self)
+  NSUInteger	i = 0;
+
+  if (NULL == objects)
+    {
+      if (NULL == keys)
+	{
+	  return;
+	}
+      GS_FOR_IN(id, key, self)
+	{
+	  if (i >= max)
+	    {
+	      return;
+	    }
+	  keys[i++] = key;
+	}
+      GS_END_FOR(self)
+      while (i < max)
+	{
+	  keys[i++] = nil;
+	}
+    }
+  else
+    {
+      IMP	oImp = [self methodForSelector: objSel];
+
+      if (NULL == keys)
+	{
+	  GS_FOR_IN(id, key, self)
+	    {
+	      if (i >= max)
+		{
+		  return;
+		}
+	      objects[i++] = (*oImp)(self, objSel, key);
+	    }
+	  GS_END_FOR(self)
+	  while (i < max)
+	    {
+	      objects[i++] = nil;
+	    }
+	}
+      else
+	{
+	  GS_FOR_IN(id, key, self)
+	    {
+	      if (i >= max)
+		{
+		  return;
+		}
+	      keys[i] = key;
+	      objects[i++] = (*oImp)(self, objSel, key);
+	    }
+	  GS_END_FOR(self)
+	  while (i < max)
+	    {
+	      keys[i] = nil;
+	      objects[i++] = nil;
+	    }
+	}
+    }
+}
+
+- (void) getObjects: (__unsafe_unretained id[])objects
+            andKeys: (__unsafe_unretained id[])keys
+{
+  [self getObjects: objects andKeys: keys count: [self count]];
 }
 
 /**
@@ -962,8 +1064,11 @@ compareIt(id o1, id o2, void* context)
 
 - (NSArray *) keysSortedByValueUsingComparator: (NSComparator)cmptr
 {
+#pragma GCC diagnostic push 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self keysSortedByValueWithOptions: 0
 			    usingComparator: cmptr];
+#pragma GCC diagnostic pop 
 }
 
 - (NSArray *) keysSortedByValueWithOptions: (NSSortOptions)opts
@@ -974,8 +1079,11 @@ compareIt(id o1, id o2, void* context)
   NSMutableArray	*result;
 
   ENTER_POOL
+#pragma GCC diagnostic push 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   sortedValues = [[self allValues] sortedArrayWithOptions: opts
 					  usingComparator: cmptr];
+#pragma GCC diagnostic pop 
   noDuplicates = [[NSOrderedSet orderedSetWithArray: sortedValues] array];
   result = [[NSMutableArray alloc] initWithCapacity: [sortedValues count]];
   GS_FOR_IN(NSObject*, value, noDuplicates)
@@ -1098,8 +1206,11 @@ compareIt(id o1, id o2, void* context)
 
 - (NSSet*) keysOfEntriesPassingTest: (GSKeysAndObjectsPredicateBlock)aPredicate
 {
+#pragma GCC diagnostic push 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
   return [self keysOfEntriesWithOptions: 0
                             passingTest: aPredicate];
+#pragma GCC diagnostic pop 
 }
 
 /**

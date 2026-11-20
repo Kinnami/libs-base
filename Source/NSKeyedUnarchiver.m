@@ -30,6 +30,7 @@
 #import "Foundation/NSError.h"
 #import "Foundation/FoundationErrors.h"
 #import "Foundation/NSException.h"
+#import "Foundation/FoundationErrors.h"
 #import "Foundation/NSMapTable.h"
 #import "Foundation/NSNull.h"
 #import "Foundation/NSValue.h"
@@ -56,6 +57,25 @@
 @end
 
 static NSMapTable	*globalClassMap = 0;
+
+static NSError *
+GSNSErrorFromUnarchiverException(NSException *exception)
+{
+  NSDictionary	*info;
+  NSString	*reason = [exception reason];
+
+  if (reason == nil)
+    {
+      reason = @"The archive data could not be decoded.";
+    }
+  info = [NSDictionary dictionaryWithObjectsAndKeys:
+    reason, NSLocalizedDescriptionKey,
+    [exception name], @"NSExceptionName",
+    nil];
+  return [NSError errorWithDomain: NSCocoaErrorDomain
+			     code: NSFileReadCorruptFileError
+			 userInfo: info];
+}
 
 #define	GETVAL \
   id		o; \
@@ -429,6 +449,11 @@ static NSMapTable	*globalClassMap = 0;
   NS_DURING
     {
       u = [[NSKeyedUnarchiver alloc] initForReadingWithData: data];
+      if (u == nil)
+	{
+	  [NSException raise: NSInvalidUnarchiveOperationException
+		      format: @"The data is not a keyed archive"];
+	}
       [u setRequiresSecureCoding: YES];
       u->_allowedClasses = classes;
       o = RETAIN([u decodeObjectForKey: @"root"]);
@@ -464,7 +489,24 @@ static NSMapTable	*globalClassMap = 0;
                         fromData: (NSData*)data
                            error: (NSError**)error
 {
-  return [self _unarchivedRootFromData: data allowedClasses: classes error: error];
+  id object = nil;
+
+  NS_DURING
+    {
+      object = RETAIN([self _unarchivedRootFromData: data
+				     allowedClasses: classes
+					      error: error]);
+    }
+  NS_HANDLER
+    {
+      if (error != 0)
+	{
+	  *error = GSNSErrorFromUnarchiverException(localException);
+	}
+      DESTROY(object);
+    }
+  NS_ENDHANDLER
+  return AUTORELEASE(object);
 }
 
 + (NSArray*) unarchivedArrayOfObjectsOfClass: (Class)cls
@@ -817,7 +859,7 @@ static NSMapTable	*globalClassMap = 0;
 - (id) decodeObjectOfClasses: (NSSet *)classes forKey: (NSString *)key
 {
   NSSet	*saved = _allowedClasses;
-  id	o;
+  id	o = nil;
 
   /* Restrict the allowed classes for this key's subtree, restoring the
    * enclosing set afterwards (the enforcement itself is in -_decodeObject:
@@ -960,7 +1002,7 @@ static NSMapTable	*globalClassMap = 0;
 	{
 	  int		count = atoi(++type);
 
-	  while (isdigit(*type))
+	  while (isdigit(*(const uint8_t*)type))
 	    {
 	      type++;
 	    }
@@ -1032,6 +1074,7 @@ static NSMapTable	*globalClassMap = 0;
 	  unsigned	i;
 
 	  IF_NO_ARC(RETAIN(_archive);)
+	  NS_DURING
 	  _archiverClass = [_archive objectForKey: @"$archiver"];
 	  _version = [_archive objectForKey: @"$version"];
 
@@ -1047,6 +1090,10 @@ static NSMapTable	*globalClassMap = 0;
 	    {
 	      GSIArrayAddItem(_objMap, (GSIArrayItem)(id)nil);
 	    }
+	  NS_HANDLER
+	  RELEASE(self);
+	  [localException raise];
+	  NS_ENDHANDLER
 	}
     }
   return self;
@@ -1124,4 +1171,3 @@ static NSMapTable	*globalClassMap = 0;
   return self;
 }
 @end
-

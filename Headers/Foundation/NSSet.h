@@ -39,8 +39,10 @@ extern "C" {
 
 @class GS_GENERIC_CLASS(NSArray, ElementT);
 @class GS_GENERIC_CLASS(NSEnumerator, ElementT);
-@class GS_GENERIC_CLASS(NSDictionary, KeyT:id<NSCopying>, ValT);
+@class GS_GENERIC_CLASS(NSDictionary, KeyT, ValT);
 @class NSString;
+
+NS_ASSUME_NONNULL_BEGIN
 
 GS_EXPORT_CLASS
 @interface GS_GENERIC_CLASS(NSSet, __covariant ElementT) : NSObject <NSCoding, NSSecureCoding,
@@ -53,22 +55,24 @@ GS_EXPORT_CLASS
 + (instancetype) setWithObject: (GS_GENERIC_TYPE(ElementT))anObject;
 + (instancetype) setWithObjects: (GS_GENERIC_TYPE(ElementT))firstObject, ...;
 #if OS_API_VERSION(GS_API_MACOSX, GS_API_LATEST)
-+ (instancetype) setWithObjects: (const GS_GENERIC_TYPE(ElementT)[])objects
++ (instancetype) setWithObjects:
+  (const GS_GENERIC_TYPE(ElementT) _Nonnull [])objects
 		                  count: (NSUInteger)count;
 #endif
 + (instancetype) setWithSet: (GS_GENERIC_CLASS(NSSet, ElementT)*)aSet;
 
 - (GS_GENERIC_CLASS(NSArray, ElementT)*) allObjects;
-- (GS_GENERIC_TYPE(ElementT)) anyObject;
+- (GS_GENERIC_TYPE(ElementT) _Nullable) anyObject;
 - (BOOL) containsObject: (GS_GENERIC_TYPE(ElementT))anObject;
 - (NSUInteger) count;
 - (NSString*) description;
-- (NSString*) descriptionWithLocale: (id)locale;
+- (NSString*) descriptionWithLocale: (id _Nullable)locale;
 
 - (instancetype) init;
 - (instancetype) initWithArray: (GS_GENERIC_CLASS(NSArray, ElementT)*)other;
 - (instancetype) initWithObjects: (GS_GENERIC_TYPE(ElementT))firstObject, ...;
-- (instancetype) initWithObjects: (const GS_GENERIC_TYPE(ElementT)[])objects
+- (instancetype) initWithObjects:
+  (const GS_GENERIC_TYPE(ElementT) _Nonnull [])objects
 		                   count: (NSUInteger)count;
 - (instancetype) initWithSet: (GS_GENERIC_CLASS(NSSet, ElementT)*)other;
 - (instancetype) initWithSet: (GS_GENERIC_CLASS(NSSet, ElementT)*)other
@@ -79,12 +83,14 @@ GS_EXPORT_CLASS
 - (BOOL) isSubsetOfSet: (GS_GENERIC_CLASS(NSSet, ElementT)*)otherSet;
 
 - (void) makeObjectsPerform: (SEL)aSelector;
-- (void) makeObjectsPerform: (SEL)aSelector withObject: (id)argument;
+- (void) makeObjectsPerform: (SEL)aSelector withObject: (id _Nullable)argument;
 #if OS_API_VERSION(GS_API_MACOSX, GS_API_LATEST)
 - (void) makeObjectsPerformSelector: (SEL)aSelector;
-- (void) makeObjectsPerformSelector: (SEL)aSelector withObject: (id)argument;
+- (void) makeObjectsPerformSelector: (SEL)aSelector
+                         withObject: (id _Nullable)argument;
 #endif
-- (GS_GENERIC_TYPE(ElementT)) member: (GS_GENERIC_TYPE(ElementT))anObject;
+- (GS_GENERIC_TYPE(ElementT) _Nullable) member:
+  (GS_GENERIC_TYPE(ElementT))anObject;
 - (GS_GENERIC_CLASS(NSEnumerator, ElementT)*) objectEnumerator;
 
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_6, GS_API_LATEST)
@@ -98,7 +104,8 @@ DEFINE_BLOCK_TYPE(GSSetFilterBlock, BOOL, GS_GENERIC_TYPE(ElementT), BOOL*);
  * whether the enumeration should stop.  Setting this to YES will interupt
  * the enumeration.
  */
-- (void) enumerateObjectsUsingBlock:(GSSetEnumeratorBlock)aBlock;
+- (void) enumerateObjectsUsingBlock:(GSSetEnumeratorBlock)aBlock
+GS_NON_PORTABLE(use fast enumeration instead);
 
 /**
  * Enumerate over the collection using the given block.  The first argument is
@@ -111,14 +118,17 @@ DEFINE_BLOCK_TYPE(GSSetFilterBlock, BOOL, GS_GENERIC_TYPE(ElementT), BOOL*);
  * that it should be enumerated in reverse order.
  */
 - (void) enumerateObjectsWithOptions: (NSEnumerationOptions)opts
-                          usingBlock: (GSSetEnumeratorBlock)aBlock;
+                          usingBlock: (GSSetEnumeratorBlock)aBlock
+GS_NON_PORTABLE(use fast enumeration instead);
 
 - (GS_GENERIC_CLASS(NSSet, ElementT) *) objectsPassingTest:
-    (GSSetFilterBlock)aBlock;
+    (GSSetFilterBlock)aBlock
+GS_NON_PORTABLE(use fast enumeration instead);
 
 - (GS_GENERIC_CLASS(NSSet, ElementT) *) objectsWithOptions:
     (NSEnumerationOptions)opts
-                                    passingTest: (GSSetFilterBlock)aBlock;
+                                    passingTest: (GSSetFilterBlock)aBlock
+GS_NON_PORTABLE(use fast enumeration instead);
 #endif
 
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_5,GS_API_LATEST)
@@ -196,6 +206,8 @@ GS_EXPORT_CLASS
 - (GS_GENERIC_TYPE(ElementT)) unique:
     (GS_GENERIC_TYPE(ElementT)) NS_CONSUMED anObject NS_RETURNS_RETAINED;
 @end
+
+NS_ASSUME_NONNULL_END
 
 /*
  * Functions for managing a global uniquing set.

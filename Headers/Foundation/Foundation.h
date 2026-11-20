@@ -196,8 +196,10 @@
 #  if __has_include(<CoreFoundation/CoreFoundation.h>)
 #    include <CoreFoundation/CoreFoundation.h>
 #  endif
-#  if __has_include(<dispatch/dispatch.h>)
-#    include <dispatch/dispatch.h>
+#  if	GS_USE_LIBDISPATCH
+#    if __has_include(<dispatch/dispatch.h>)
+#      include <dispatch/dispatch.h>
+#    endif
 #  endif
 #endif
 

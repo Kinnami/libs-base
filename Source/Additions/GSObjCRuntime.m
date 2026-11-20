@@ -728,7 +728,6 @@ gs_string_hash(const char *s)
 #include "GNUstepBase/GSIMap.h"
 
 static GSIMapTable_t protocol_by_name;
-static BOOL protocol_by_name_init = NO;
 static gs_mutex_t protocol_by_name_lock = GS_MUTEX_INIT_STATIC;
 
 /* Not sure about the semantics of inlining
@@ -736,24 +735,23 @@ static gs_mutex_t protocol_by_name_lock = GS_MUTEX_INIT_STATIC;
 static void
 gs_init_protocol_lock(void)
 {
+  static BOOL protocol_by_name_init = NO;
+
   GS_MUTEX_LOCK(protocol_by_name_lock);
   if (protocol_by_name_init == NO)
-  	{
-	  GSIMapInitWithZoneAndCapacity (&protocol_by_name,
-					 NSDefaultMallocZone(),
-					 128);
-	  protocol_by_name_init = YES;
-	}
+    {
+      GSIMapInitWithZoneAndCapacity(&protocol_by_name,
+	NSDefaultMallocZone(),
+	128);
+      protocol_by_name_init = YES;
+    }
   GS_MUTEX_UNLOCK(protocol_by_name_lock);
 }
 
 void
 GSRegisterProtocol(Protocol *proto)
 {
-  if (protocol_by_name_init == NO)
-    {
-      gs_init_protocol_lock();
-    }
+  gs_init_protocol_lock();
 
   if (proto != nil)
     {
@@ -778,10 +776,7 @@ GSProtocolFromName(const char *name)
   GSIMapNode node;
   Protocol *p;
 
-  if (protocol_by_name_init == NO)
-    {
-      gs_init_protocol_lock();
-    }
+  gs_init_protocol_lock();
 
   node = GSIMapNodeForKey(&protocol_by_name, (GSIMapKey) name);
   if (node)
@@ -1982,7 +1977,7 @@ GSAutoreleasedBuffer(unsigned size)
   static Class	buffer_class = 0;
   static Class	autorelease_class;
   static SEL	autorelease_sel;
-  static id	(*autorelease_imp)(Class, SEL, id);
+  static void	(*autorelease_imp)(Class, SEL, id);
   static int	instance_size;
   static int	offset;
   NSObject	*o;
@@ -1994,7 +1989,7 @@ GSAutoreleasedBuffer(unsigned size)
       offset = instance_size % ALIGN;
       autorelease_class = [NSAutoreleasePool class];
       autorelease_sel = @selector(addObject:);
-      autorelease_imp = (id (*)(Class, SEL, id))
+      autorelease_imp = (void (*)(Class, SEL, id))
         [autorelease_class methodForSelector: autorelease_sel];
     }
   o = (NSObject*)NSAllocateObject(buffer_class,
@@ -2333,4 +2328,3 @@ GSObjCPrint(void *base, void *item)
       fprintf(fptr, "}\n");
     }
 }
-

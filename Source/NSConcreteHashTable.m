@@ -60,7 +60,11 @@ typedef GSIMapNode_t *GSIMapNode;
   GSIMapNode	freeNodes;	/* List of unused nodes.	*/
   GSIMapNode	*nodeChunks;	/* Chunks of allocated memory.	*/
   size_t	chunkCount;	/* Number of chunks in array.	*/
-  size_t	increment;	/* Amount to grow by.		*/
+  uint32_t	increment;	/* Amount to grow by.		*/
+  uint8_t	smallMap;
+  uint8_t	reserved1;
+  uint8_t	reserved2;
+  uint8_t	reserved3;
   unsigned long	version;	/* For fast enumeration.	*/
   BOOL		legacy;		/* old style callbacks?		*/
   union {
@@ -84,7 +88,7 @@ typedef GSIMapNode_t *GSIMapNode;
  (M->legacy ? M->cb.old.isEqual(M, X.ptr, Y.ptr) \
  : pointerFunctionsEqual(&M->cb.pf, X.ptr, Y.ptr))
 #define GSI_MAP_ZEROED(M)\
- (M->legacy ? 0 : (IS_WEAK(M) ? YES : NO))
+ (M->legacy ? 0 : (IS_WEAK(M) ? 1 : 0))
 
 /* NSPointerFunctions provides functions which combine the actions of
  * memory allocation/deallocation with those of assignment, so we make
@@ -413,12 +417,17 @@ NSHashGet(NSHashTable *table, const void *element)
     }
   if (object_getClass(table) == concreteClass)
     {
-      GSIMapNode	n;
+      NSConcreteHashTable	*t = (NSConcreteHashTable*)table;
+      GSIMapNode		n;
 
       n = GSIMapNodeForKey((GSIMapTable)table, (GSIMapKey)element);
-      if (n == 0)
+      if (0 == n)
 	{
 	  return 0;
+	}
+      else if (IS_WEAK(t))
+	{
+	  return objc_loadWeak(&n->key.obj);
 	}
       else
 	{
@@ -629,22 +638,20 @@ NSNextHashEnumeratorItem(NSHashEnumerator *enumerator)
     }
   if (enumerator->map != 0)		// Got a GSIMapTable enumerator
     {
+      NSConcreteHashTable *map = enumerator->map;
       GSIMapNode    n;
 
       /* The 'map' field is non-null, so this NSHashEnumerator is actually
        * a GSIMapEnumerator.
        */
-      n = GSIMapEnumeratorNextNode((GSIMapEnumerator)enumerator);
-      if (n == 0)
+      while ((n = GSIMapEnumeratorNextNode((GSIMapEnumerator)enumerator)) != 0)
 	{
-	  return 0;
-	}
-      else
-	{
-          NSConcreteHashTable *map = enumerator->map;
+	  void	*v = GSI_MAP_READ_KEY(map, &n->key).ptr;
 
-          return GSI_MAP_READ_KEY(map, &n->key).ptr;
+
+	  return v;
 	}
+      return 0;
     }
   else if (enumerator->node != 0)	// Got an enumerator object
     {
@@ -908,7 +915,7 @@ const NSHashTableCallBacks NSPointerToStructHashCallBacks =
     {
       return nil;
     }
-  return node->key.obj;
+  return (GSI_MAP_READ_KEY(self, &node->key).obj);
 }
 
 - (BOOL) containsObject: (id)anObject
@@ -923,6 +930,11 @@ const NSHashTableCallBacks NSPointerToStructHashCallBacks =
 	}
     }
   return NO;
+}
+
+- (void) compact
+{
+  GSIMapRemoveWeak(self);
 }
 
 - (id) copyWithZone: (NSZone*)aZone
@@ -1028,7 +1040,7 @@ const NSHashTableCallBacks NSPointerToStructHashCallBacks =
 
       if (node)
 	{
-	  return node->key.obj;
+	  return (GSI_MAP_READ_KEY(self, &node->key).obj);
 	}
     }
   return nil;
@@ -1088,13 +1100,13 @@ const NSHashTableCallBacks NSPointerToStructHashCallBacks =
 
 - (id) nextObject
 {
-  GSIMapNode	node = GSIMapEnumeratorNextNode(&enumerator);
+  GSIMapKey	key;
 
-  if (node == 0)
+  if (GSIMapEnumeratorNext(&enumerator, &key))
     {
-      return nil;
+      return key.obj;
     }
-  return node->key.obj;
+  return nil;
 }
 
 - (void) dealloc

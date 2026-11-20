@@ -48,6 +48,7 @@ extern "C" {
 @class NSInvocation;
 @class Protocol;
 
+
 /**
  * The NSObject protocol describes a minimal set of methods that all
  * objects are expected to support.  You should be able to send any
@@ -71,7 +72,7 @@ extern "C" {
  * superclass of the receiver's class, ignoring proxies, then use
  * "class_getSuperclass(object_getClass())".
  */
-- (Class) superclass;
+- (Class _Nullable) superclass;
 
 /**
  * Returns whether the receiver is equal to the argument.  Defining equality is
@@ -90,7 +91,7 @@ extern "C" {
  * If two objects are equal, then they must have the same hash value, however
  * equal hash values do not imply equality.
  */
-- (BOOL) isEqual: (id)anObject;
+- (BOOL) isEqual: (id _Nullable)anObject;
 
 /**
  * Returns YES if the receiver is an instance of the class, an instance of the
@@ -141,24 +142,24 @@ extern "C" {
  * Performs the specified selector.  The selector must correspond to a method
  * that takes no arguments.
  */
-- (id) performSelector: (SEL)aSelector;
+- (id _Nullable) performSelector: (SEL)aSelector;
 
 /**
  * Performs the specified selector, with the object as the argument.  This
  * method does not perform any automatic unboxing, so the selector must
  * correspond to a method that takes one object argument.
  */
-- (id) performSelector: (SEL)aSelector
-	    withObject: (id)anObject;
+- (id _Nullable) performSelector: (SEL)aSelector
+		      withObject: (id _Nullable)anObject;
 
 /**
  * Performs the specified selector, with the objects as the arguments.  This
  * method does not perform any automatic unboxing, so the selector must
  * correspond to a method that takes two object arguments.
  */
-- (id) performSelector: (SEL)aSelector
-	    withObject: (id)object1
-	    withObject: (id)object2;
+- (id _Nullable) performSelector: (SEL)aSelector
+		      withObject: (id _Nullable)object1
+		      withObject: (id _Nullable)object2;
 
 /**
  * Returns YES if the object can respond to messages with the specified
@@ -223,7 +224,7 @@ extern "C" {
 /**
  * Returns the zone of the object.
  */
-- (NSZone*) zone NS_AUTOMATED_REFCOUNT_UNAVAILABLE;
+- (NSZone *_Nullable) zone NS_AUTOMATED_REFCOUNT_UNAVAILABLE;
 @end
 
 /**
@@ -246,7 +247,7 @@ extern "C" {
  * new copy, or are themselves copied, or whether some other mechanism
  * entirely is used.
  */
-- (id) copyWithZone: (NSZone*)zone;
+- (id) copyWithZone: (NSZone *_Nullable)zone;
 @end
 
 /**
@@ -268,7 +269,7 @@ extern "C" {
  * new copy, or are themselves copied, or whether some other mechanism
  * entirely is used.
  */
-- (id) mutableCopyWithZone: (NSZone*)zone;
+- (id) mutableCopyWithZone: (NSZone *_Nullable)zone;
 @end
 
 /**
@@ -293,7 +294,7 @@ extern "C" {
  * documentation for [NSCoder], [NSUnarchiver], [NSKeyedUnarchiver], and/or
  * [NSPortCoder] for more information.
  */
-- (id) initWithCoder: (NSCoder*)aDecoder NS_REPLACES_RECEIVER;
+- (id _Nullable) initWithCoder: (NSCoder*)aDecoder NS_REPLACES_RECEIVER;
 @end
 
 @protocol NSSecureCoding <NSCoding>
@@ -325,7 +326,7 @@ GS_EXPORT_CLASS GS_ROOT_CLASS
 - (NSString*) className;
 #endif
 
-+ (id) allocWithZone: (NSZone*)z;
++ (id) allocWithZone: (NSZone *_Nullable)z;
 + (id) alloc;
 + (Class) class;
 
@@ -375,8 +376,8 @@ GS_EXPORT_CLASS GS_ROOT_CLASS
  * of +initialize.
  */
 + (void) initialize;
-+ (IMP) instanceMethodForSelector: (SEL)aSelector;
-+ (NSMethodSignature*) instanceMethodSignatureForSelector: (SEL)aSelector;
++ (IMP _Nullable) instanceMethodForSelector: (SEL)aSelector;
++ (NSMethodSignature *_Nullable) instanceMethodSignatureForSelector: (SEL)aSelector;
 + (BOOL) instancesRespondToSelector: (SEL)aSelector;
 + (BOOL) isSubclassOfClass: (Class)aClass;
 + (id) new;
@@ -392,12 +393,12 @@ GS_EXPORT_CLASS GS_ROOT_CLASS
 - (void) doesNotRecognizeSelector: (SEL)aSelector;
 - (void) forwardInvocation: (NSInvocation*)anInvocation;
 - (id) init;
-- (IMP) methodForSelector: (SEL)aSelector;
-- (NSMethodSignature*) methodSignatureForSelector: (SEL)aSelector;
+- (IMP _Nullable) methodForSelector: (SEL)aSelector;
+- (NSMethodSignature *_Nullable) methodSignatureForSelector: (SEL)aSelector;
 - (id) mutableCopy;
 - (id) replacementObjectForArchiver: (NSArchiver*)anArchiver;
 - (id) replacementObjectForCoder: (NSCoder*)anEncoder;
-- (Class) superclass;
+- (Class _Nullable) superclass;
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_5, GS_API_LATEST)
 /**
  * This method will be called when attempting to send a message a class that
@@ -450,10 +451,11 @@ GS_EXPORT_CLASS GS_ROOT_CLASS
  * runtime, you must also implement -forwardInvocation: with equivalent
  * semantics.  This will be considerably slower, but more portable.
  */
-- (id) forwardingTargetForSelector: (SEL)aSelector;
+- (id _Nullable) forwardingTargetForSelector: (SEL)aSelector;
 
 #endif
 @end
+
 
 /**
  * Used to allocate memory to hold an object, and initialise the
@@ -520,6 +522,7 @@ NSIncrementExtraRefCount(id anObject);
  *  Declares some methods for sending messages to self after a fixed delay.
  *  (These methods <em>are</em> in OpenStep and OS X.)
  */
+
 @interface NSObject (TimedPerformers)
 
 /**
@@ -537,13 +540,13 @@ NSIncrementExtraRefCount(id anObject);
  */
 + (void) cancelPreviousPerformRequestsWithTarget: (id)obj
 					selector: (SEL)s
-					  object: (id)arg;
+					  object: (id _Nullable)arg;
 /**
  * Sets given message to be sent to this instance after given delay,
  * in any run loop mode.  See [NSRunLoop].
  */
 - (void) performSelector: (SEL)s
-	      withObject: (id)arg
+	      withObject: (id _Nullable)arg
 	      afterDelay: (NSTimeInterval)seconds;
 
 /**
@@ -551,7 +554,7 @@ NSIncrementExtraRefCount(id anObject);
  * in given run loop modes.  See [NSRunLoop].
  */
 - (void) performSelector: (SEL)s
-	      withObject: (id)arg
+	      withObject: (id _Nullable)arg
 	      afterDelay: (NSTimeInterval)seconds
 		 inModes: (NSArray*)modes;
 @end
@@ -591,6 +594,7 @@ NSIncrementExtraRefCount(id anObject);
  */
 - (BOOL) isContentDiscarded;
 @end
+
 #endif
 #if	defined(__cplusplus)
 }
