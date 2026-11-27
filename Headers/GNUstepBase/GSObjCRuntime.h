@@ -77,7 +77,9 @@ GS_EXPORT id objc_initWeak(id *addr, id obj);
 GS_EXPORT id objc_loadWeakRetained(id *addr);
 GS_EXPORT void objc_moveWeak(id *dest, id *src);
 
-#if !defined(__APPLE__)
+/* CJEC, 21-Nov-26: gcc/GNU runtime: Objective-C++ compiler does not allow redefinition of uintptr_t
+*/
+#if !defined(__APPLE__) && defined (__GNUSTEP_RUNTIME__)
 
 GS_EXPORT id objc_loadWeak(id *object);
 GS_EXPORT id objc_storeWeak(id *addr, id obj);
